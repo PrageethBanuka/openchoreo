@@ -130,6 +130,58 @@ func TestIndexResourceReleaseBindingOwnerEnv(t *testing.T) {
 	}
 }
 
+func TestIndexEndpointReleaseBindingOwnerEnv(t *testing.T) {
+	t.Run("returns_composite_key_when_all_fields_set", func(t *testing.T) {
+		erb := &openchoreov1alpha1.EndpointReleaseBinding{
+			Spec: openchoreov1alpha1.EndpointReleaseBindingSpec{
+				Owner: openchoreov1alpha1.EndpointReleaseBindingOwner{
+					ProjectName:  "shop",
+					EndpointName: "payments-api",
+				},
+				Environment: "dev",
+			},
+		}
+		got := IndexEndpointReleaseBindingOwnerEnv(erb)
+		require.Len(t, got, 1)
+		assert.Equal(t, "shop/payments-api/dev", got[0])
+	})
+
+	t.Run("empty_environment_returns_nil", func(t *testing.T) {
+		erb := &openchoreov1alpha1.EndpointReleaseBinding{
+			Spec: openchoreov1alpha1.EndpointReleaseBindingSpec{
+				Owner: openchoreov1alpha1.EndpointReleaseBindingOwner{ProjectName: "shop", EndpointName: "payments-api"},
+			},
+		}
+		assert.Nil(t, IndexEndpointReleaseBindingOwnerEnv(erb))
+	})
+}
+
+func TestIndexEndpointBackendComponent(t *testing.T) {
+	t.Run("returns_one_key_per_distinct_backend_component", func(t *testing.T) {
+		ep := &openchoreov1alpha1.Endpoint{
+			Spec: openchoreov1alpha1.EndpointSpec{
+				Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
+				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
+					{ComponentName: "payments-v1", Endpoint: "api"},
+					{ComponentName: "payments-v2", Endpoint: "api"},
+					{ComponentName: "payments-v1", Endpoint: "admin"},
+				},
+			},
+		}
+		got := IndexEndpointBackendComponent(ep)
+		assert.ElementsMatch(t, []string{"shop/payments-v1", "shop/payments-v2"}, got)
+	})
+
+	t.Run("empty_project_returns_nil", func(t *testing.T) {
+		ep := &openchoreov1alpha1.Endpoint{
+			Spec: openchoreov1alpha1.EndpointSpec{
+				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "api"}},
+			},
+		}
+		assert.Nil(t, IndexEndpointBackendComponent(ep))
+	})
+}
+
 func TestIndexProjectReleaseBindingOwner(t *testing.T) {
 	// Register through SetupSharedIndexes so the test exercises the same
 	// registration path the manager uses.

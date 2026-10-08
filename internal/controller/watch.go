@@ -56,6 +56,22 @@ const (
 	// IndexKeyProjectReleaseOwner indexes ProjectRelease by owner project name
 	// so the Project controller can list and delete all releases of a project.
 	IndexKeyProjectReleaseOwner = "projectrelease.spec.owner.projectName"
+
+	// IndexKeyEndpointReleaseOwnerEndpointName indexes EndpointRelease by owner endpoint name.
+	IndexKeyEndpointReleaseOwnerEndpointName = "endpointrelease.spec.owner.endpointName"
+
+	// IndexKeyEndpointReleaseBindingOwnerEndpointName indexes EndpointReleaseBinding by owner endpoint name.
+	IndexKeyEndpointReleaseBindingOwnerEndpointName = "endpointreleasebinding.spec.owner.endpointName"
+
+	// IndexKeyEndpointReleaseBindingOwnerEnv indexes EndpointReleaseBinding by the composite key
+	// (projectName, endpointName, environment) so the binding for an Endpoint in a given
+	// environment can be located in O(1).
+	IndexKeyEndpointReleaseBindingOwnerEnv = "endpointreleasebinding.spec.owner.projectName/endpointName/environment"
+
+	// IndexKeyEndpointBackendComponent indexes Endpoint by the (projectName, componentName)
+	// of each of its backendRefs, so a ReleaseBinding can find the Endpoints that route to
+	// its component.
+	IndexKeyEndpointBackendComponent = "endpoint.spec.backendRefs.projectName/componentName"
 )
 
 // MakeReleaseBindingOwnerEnvKey creates the composite index key for ReleaseBinding lookups
@@ -69,6 +85,18 @@ func MakeReleaseBindingOwnerEnvKey(projectName, componentName, environment strin
 // ReleaseBindings to locate the matching provider for a (project, ref, env) tuple.
 func MakeResourceReleaseBindingOwnerEnvKey(projectName, resourceName, environment string) string {
 	return projectName + "/" + resourceName + "/" + environment
+}
+
+// MakeEndpointReleaseBindingOwnerEnvKey creates the composite index key for
+// EndpointReleaseBinding lookups by (project, endpoint, environment).
+func MakeEndpointReleaseBindingOwnerEnvKey(projectName, endpointName, environment string) string {
+	return projectName + "/" + endpointName + "/" + environment
+}
+
+// MakeEndpointBackendComponentKey creates the index key for Endpoint lookups by
+// (project, backend component).
+func MakeEndpointBackendComponentKey(projectName, componentName string) string {
+	return projectName + "/" + componentName
 }
 
 // SetupSharedIndexes registers field indexes that are shared across multiple controllers.
@@ -181,7 +209,88 @@ func SetupSharedIndexes(ctx context.Context, mgr ctrl.Manager) error {
 		return fmt.Errorf("failed to setup ProjectRelease owner index: %w", err)
 	}
 
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &openchoreov1alpha1.EndpointRelease{},
+		IndexKeyEndpointReleaseOwnerEndpointName, IndexEndpointReleaseOwner); err != nil {
+		return fmt.Errorf("failed to setup EndpointRelease owner index: %w", err)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &openchoreov1alpha1.EndpointReleaseBinding{},
+		IndexKeyEndpointReleaseBindingOwnerEndpointName, IndexEndpointReleaseBindingOwner); err != nil {
+		return fmt.Errorf("failed to setup EndpointReleaseBinding owner index: %w", err)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &openchoreov1alpha1.EndpointReleaseBinding{},
+		IndexKeyEndpointReleaseBindingOwnerEnv, IndexEndpointReleaseBindingOwnerEnv); err != nil {
+		return fmt.Errorf("failed to setup EndpointReleaseBinding owner+env index: %w", err)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &openchoreov1alpha1.Endpoint{},
+		IndexKeyEndpointBackendComponent, IndexEndpointBackendComponent); err != nil {
+		return fmt.Errorf("failed to setup Endpoint backend component index: %w", err)
+	}
+
 	return nil
+}
+
+// IndexEndpointReleaseOwner extracts the owner endpoint name from an
+// EndpointRelease. Exported for fake-client tests so they can register the
+// same indexer the production setup uses.
+func IndexEndpointReleaseOwner(obj client.Object) []string {
+	er := obj.(*openchoreov1alpha1.EndpointRelease)
+	if er.Spec.Owner.EndpointName == "" {
+		return nil
+	}
+	return []string{er.Spec.Owner.EndpointName}
+}
+
+// IndexEndpointReleaseBindingOwner extracts the owner endpoint name from an
+// EndpointReleaseBinding. Exported for fake-client tests so they can register
+// the same indexer the production setup uses.
+func IndexEndpointReleaseBindingOwner(obj client.Object) []string {
+	erb := obj.(*openchoreov1alpha1.EndpointReleaseBinding)
+	if erb.Spec.Owner.EndpointName == "" {
+		return nil
+	}
+	return []string{erb.Spec.Owner.EndpointName}
+}
+
+// IndexEndpointReleaseBindingOwnerEnv extracts the composite (project, endpoint, environment)
+// index key from an EndpointReleaseBinding. Exported for fake-client tests so they can
+// register the same indexer the production setup uses.
+func IndexEndpointReleaseBindingOwnerEnv(obj client.Object) []string {
+	erb := obj.(*openchoreov1alpha1.EndpointReleaseBinding)
+	if erb.Spec.Owner.ProjectName == "" || erb.Spec.Owner.EndpointName == "" || erb.Spec.Environment == "" {
+		return nil
+	}
+	return []string{MakeEndpointReleaseBindingOwnerEnvKey(
+		erb.Spec.Owner.ProjectName,
+		erb.Spec.Owner.EndpointName,
+		erb.Spec.Environment,
+	)}
+}
+
+// IndexEndpointBackendComponent extracts one (project, component) key per distinct
+// backend component of an Endpoint. Exported for fake-client tests so they can
+// register the same indexer the production setup uses.
+func IndexEndpointBackendComponent(obj client.Object) []string {
+	ep := obj.(*openchoreov1alpha1.Endpoint)
+	if ep.Spec.Owner.ProjectName == "" {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ep.Spec.BackendRefs))
+	keys := make([]string, 0, len(ep.Spec.BackendRefs))
+	for _, ref := range ep.Spec.BackendRefs {
+		if ref.ComponentName == "" {
+			continue
+		}
+		key := MakeEndpointBackendComponentKey(ep.Spec.Owner.ProjectName, ref.ComponentName)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // IndexResourceReleaseOwner extracts the owner resource name from a
