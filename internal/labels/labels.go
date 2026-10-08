@@ -31,6 +31,14 @@ const (
 	// identification across name reuse.
 	LabelKeyResourceUID = "openchoreo.dev/resource-uid"
 
+	// LabelKeyEndpointResourceName identifies the Endpoint CR (traffic routing
+	// abstraction) that owns a rendered DP-side object. Distinct from
+	// LabelKeyEndpointName, which names a workload endpoint on a gateway route.
+	LabelKeyEndpointResourceName = "openchoreo.dev/endpoint"
+	// LabelKeyEndpointResourceUID carries the owning Endpoint CR's UID for
+	// stable identification across name reuse.
+	LabelKeyEndpointResourceUID = "openchoreo.dev/endpoint-uid"
+
 	// LabelKeyCreatedBy identifies which controller initially created a resource (audit trail).
 	// Example: A namespace created by renderedrelease-controller would have created-by=renderedrelease-controller.
 	// Note: For shared resources like namespaces, the creator and lifecycle manager may differ.

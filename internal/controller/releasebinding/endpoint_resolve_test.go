@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
+	"github.com/openchoreo/openchoreo/internal/controller/endpointurl"
 	"github.com/openchoreo/openchoreo/internal/labels"
 )
 
@@ -26,7 +27,7 @@ func urlToString(u *openchoreov1alpha1.EndpointURL) string {
 	url := u.Scheme + "://" + u.Host
 
 	// Add port if it's not the default port for the scheme
-	if u.Port != 0 && !((u.Scheme == schemeHTTP && u.Port == 80) || (u.Scheme == schemeHTTPS && u.Port == 443)) {
+	if u.Port != 0 && !((u.Scheme == endpointurl.SchemeHTTP && u.Port == 80) || (u.Scheme == endpointurl.SchemeHTTPS && u.Port == 443)) {
 		url += fmt.Sprintf(":%d", u.Port)
 	}
 
@@ -1003,13 +1004,13 @@ var _ = Describe("extractFirstHostname", func() {
 			hostnames: []interface{}{"first.example.com", "second.example.com"},
 		})
 		obj := unmarshalHTTPRoute(raw)
-		Expect(extractFirstHostname(obj)).To(Equal("first.example.com"))
+		Expect(endpointurl.FirstHostname(obj)).To(Equal("first.example.com"))
 	})
 
 	It("should return empty string when hostnames are absent", func() {
 		raw := makeHTTPRouteJSON(httpRouteOpts{name: "route"})
 		obj := unmarshalHTTPRoute(raw)
-		Expect(extractFirstHostname(obj)).To(BeEmpty())
+		Expect(endpointurl.FirstHostname(obj)).To(BeEmpty())
 	})
 })
 
@@ -1020,13 +1021,13 @@ var _ = Describe("extractFirstPathValue", func() {
 			pathValue: "/api/v1",
 		})
 		obj := unmarshalHTTPRoute(raw)
-		Expect(extractFirstPathValue(obj)).To(Equal("/api/v1"))
+		Expect(endpointurl.FirstPathValue(obj)).To(Equal("/api/v1"))
 	})
 
 	It("should return empty string when no path match exists", func() {
 		raw := makeHTTPRouteJSON(httpRouteOpts{name: "route"})
 		obj := unmarshalHTTPRoute(raw)
-		Expect(extractFirstPathValue(obj)).To(BeEmpty())
+		Expect(endpointurl.FirstPathValue(obj)).To(BeEmpty())
 	})
 })
 
@@ -1039,7 +1040,7 @@ var _ = Describe("routePath", func() {
 		obj.SetAnnotations(map[string]string{
 			labels.AnnotationKeyEndpointBasePath: "/demo-endpoint",
 		})
-		Expect(routePath(&indexedRoute{obj: obj, kind: httpRouteKind})).To(Equal("/demo-endpoint"))
+		Expect(endpointurl.RoutePath(obj, endpointurl.HTTPRouteKind)).To(Equal("/demo-endpoint"))
 	})
 
 	It("falls back to the first HTTPRoute match path when the annotation is absent", func() {
@@ -1047,7 +1048,7 @@ var _ = Describe("routePath", func() {
 			name:      "route",
 			pathValue: "/demo-endpoint",
 		}))
-		Expect(routePath(&indexedRoute{obj: obj, kind: httpRouteKind})).To(Equal("/demo-endpoint"))
+		Expect(endpointurl.RoutePath(obj, endpointurl.HTTPRouteKind)).To(Equal("/demo-endpoint"))
 	})
 
 	It("uses the annotation even for non-HTTPRoute kinds", func() {
@@ -1055,23 +1056,23 @@ var _ = Describe("routePath", func() {
 		obj.SetAnnotations(map[string]string{
 			labels.AnnotationKeyEndpointBasePath: "/grpc-base",
 		})
-		Expect(routePath(&indexedRoute{obj: obj, kind: grpcRouteKind})).To(Equal("/grpc-base"))
+		Expect(endpointurl.RoutePath(obj, endpointurl.GRPCRouteKind)).To(Equal("/grpc-base"))
 	})
 
 	It("returns empty for a GRPCRoute without the annotation", func() {
 		obj := unmarshalHTTPRoute(makeHTTPRouteJSON(httpRouteOpts{name: "route", pathValue: "/ignored"}))
-		Expect(routePath(&indexedRoute{obj: obj, kind: grpcRouteKind})).To(BeEmpty())
+		Expect(endpointurl.RoutePath(obj, endpointurl.GRPCRouteKind)).To(BeEmpty())
 	})
 })
 
 var _ = Describe("resolveGatewayEndpointByVisibility", func() {
 	It("should return nil when dataplane is nil", func() {
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, nil)).To(BeNil())
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, nil)).To(BeNil())
 	})
 
 	It("should return nil when no ingress is configured", func() {
 		dp := makeDataPlane(openchoreov1alpha1.GatewaySpec{})
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, dp)).To(BeNil())
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, dp)).To(BeNil())
 	})
 
 	It("should return external endpoint for external visibility", func() {
@@ -1086,7 +1087,7 @@ var _ = Describe("resolveGatewayEndpointByVisibility", func() {
 				},
 			},
 		})
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, dp)).To(Equal(extEP))
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, dp)).To(Equal(extEP))
 	})
 
 	It("should return internal endpoint for internal visibility", func() {
@@ -1101,7 +1102,7 @@ var _ = Describe("resolveGatewayEndpointByVisibility", func() {
 				Internal: intEP,
 			},
 		})
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityInternal, nil, dp)).To(Equal(intEP))
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityInternal, nil, dp)).To(Equal(intEP))
 	})
 
 	It("should return nil when external endpoint is absent for external visibility", func() {
@@ -1112,7 +1113,7 @@ var _ = Describe("resolveGatewayEndpointByVisibility", func() {
 				},
 			},
 		})
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, dp)).To(BeNil())
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityExternal, nil, dp)).To(BeNil())
 	})
 
 	It("should use internal endpoint for project visibility (non-external)", func() {
@@ -1124,7 +1125,7 @@ var _ = Describe("resolveGatewayEndpointByVisibility", func() {
 				Internal: intEP,
 			},
 		})
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityProject, nil, dp)).To(Equal(intEP))
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityProject, nil, dp)).To(Equal(intEP))
 	})
 
 	It("should use environment config when environment ingress is configured", func() {
@@ -1141,7 +1142,7 @@ var _ = Describe("resolveGatewayEndpointByVisibility", func() {
 		env := makeEnvironment(openchoreov1alpha1.GatewaySpec{
 			Ingress: &openchoreov1alpha1.GatewayNetworkSpec{External: envEP},
 		})
-		Expect(resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityExternal, env, dp)).To(Equal(envEP))
+		Expect(endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityExternal, env, dp)).To(Equal(envEP))
 	})
 })
 
@@ -1319,7 +1320,7 @@ var _ = Describe("resolveServiceURLs", func() {
 			)
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].ServiceURL).NotTo(BeNil())
-			Expect(result[0].ServiceURL.Scheme).To(Equal(schemeHTTP))
+			Expect(result[0].ServiceURL.Scheme).To(Equal(endpointurl.SchemeHTTP))
 			Expect(result[0].ServiceURL.Host).To(Equal(
 				fmt.Sprintf("%s.%s.svc.cluster.local", svcName, svcNS)))
 			Expect(result[0].ServiceURL.Port).To(Equal(int32(8080)))
@@ -1482,7 +1483,7 @@ var _ = Describe("resolveServiceURLs", func() {
 					Name: "greeter",
 					ExternalURLs: &openchoreov1alpha1.EndpointGatewayURLs{
 						HTTPS: &openchoreov1alpha1.EndpointURL{
-							Scheme: schemeHTTPS,
+							Scheme: endpointurl.SchemeHTTPS,
 							Host:   "app.example.com",
 							Port:   443,
 						},
@@ -1533,13 +1534,13 @@ var _ = Describe("resolveServiceURLs", func() {
 var _ = Describe("schemeForEndpointType", func() {
 	DescribeTable("should return correct scheme",
 		func(epType openchoreov1alpha1.EndpointProtocol, expected string) {
-			Expect(schemeForEndpointType(epType)).To(Equal(expected))
+			Expect(endpointurl.ServiceScheme(epType)).To(Equal(expected))
 		},
-		Entry("HTTP", openchoreov1alpha1.EndpointProtocolHTTP, schemeHTTP),
-		Entry("GraphQL", openchoreov1alpha1.EndpointProtocolGraphQL, schemeHTTP),
-		Entry("Websocket", openchoreov1alpha1.EndpointProtocolWebsocket, schemeWS),
-		Entry("gRPC", openchoreov1alpha1.EndpointProtocolGRPC, schemeGRPC),
-		Entry("TCP", openchoreov1alpha1.EndpointProtocolTCP, schemeTCP),
-		Entry("UDP", openchoreov1alpha1.EndpointProtocolUDP, schemeUDP),
+		Entry("HTTP", openchoreov1alpha1.EndpointProtocolHTTP, endpointurl.SchemeHTTP),
+		Entry("GraphQL", openchoreov1alpha1.EndpointProtocolGraphQL, endpointurl.SchemeHTTP),
+		Entry("Websocket", openchoreov1alpha1.EndpointProtocolWebsocket, endpointurl.SchemeWS),
+		Entry("gRPC", openchoreov1alpha1.EndpointProtocolGRPC, endpointurl.SchemeGRPC),
+		Entry("TCP", openchoreov1alpha1.EndpointProtocolTCP, endpointurl.SchemeTCP),
+		Entry("UDP", openchoreov1alpha1.EndpointProtocolUDP, endpointurl.SchemeUDP),
 	)
 })

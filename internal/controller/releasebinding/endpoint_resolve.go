@@ -13,23 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
-)
-
-const (
-	// clusterLocalSuffix is the default Kubernetes cluster domain suffix.
-	clusterLocalSuffix = "svc.cluster.local"
-
-	// URL scheme constants for endpoint types. The TLS variants are used when the
-	// workload speaks the protocol over TLS (gateway-terminated or passthrough).
-	schemeHTTP  = "http"
-	schemeHTTPS = "https"
-	schemeWS    = "ws"
-	schemeWSS   = "wss"
-	schemeGRPC  = "grpc"
-	schemeGRPCS = "grpcs"
-	schemeTCP   = "tcp"
-	schemeTLS   = "tls"
-	schemeUDP   = "udp"
+	"github.com/openchoreo/openchoreo/internal/controller/endpointurl"
 )
 
 // serviceInfo holds the name, namespace, and ports extracted from a rendered K8s Service resource.
@@ -195,31 +179,12 @@ func buildServiceURL(svc *serviceInfo, ep openchoreov1alpha1.WorkloadEndpoint) *
 	for _, svcPort := range svc.ports {
 		if svcPort == ep.Port {
 			return &openchoreov1alpha1.EndpointURL{
-				Scheme: schemeForEndpointType(ep.Type),
-				Host:   fmt.Sprintf("%s.%s.%s", svc.name, svc.namespace, clusterLocalSuffix),
+				Scheme: endpointurl.ServiceScheme(ep.Type),
+				Host:   fmt.Sprintf("%s.%s.%s", svc.name, svc.namespace, endpointurl.ClusterLocalSuffix),
 				Port:   svcPort,
 				Path:   ep.BasePath,
 			}
 		}
 	}
 	return nil
-}
-
-// schemeForEndpointType returns the URL scheme appropriate for the given endpoint type.
-func schemeForEndpointType(epType openchoreov1alpha1.EndpointProtocol) string {
-	switch epType {
-	case openchoreov1alpha1.EndpointProtocolHTTP,
-		openchoreov1alpha1.EndpointProtocolGraphQL:
-		return schemeHTTP
-	case openchoreov1alpha1.EndpointProtocolWebsocket:
-		return schemeWS
-	case openchoreov1alpha1.EndpointProtocolGRPC:
-		return schemeGRPC
-	case openchoreov1alpha1.EndpointProtocolTCP:
-		return schemeTCP
-	case openchoreov1alpha1.EndpointProtocolUDP:
-		return schemeUDP
-	default:
-		return schemeHTTP
-	}
 }

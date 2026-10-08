@@ -29,6 +29,7 @@ import (
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	kubernetesClient "github.com/openchoreo/openchoreo/internal/clients/kubernetes"
 	"github.com/openchoreo/openchoreo/internal/controller"
+	"github.com/openchoreo/openchoreo/internal/controller/endpointurl"
 	"github.com/openchoreo/openchoreo/internal/controller/renderedrelease"
 	dpkubernetes "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes"
 	"github.com/openchoreo/openchoreo/internal/labels"
@@ -37,39 +38,6 @@ import (
 	pipelinecontext "github.com/openchoreo/openchoreo/internal/pipeline/component/context"
 	"github.com/openchoreo/openchoreo/internal/template"
 )
-
-const (
-	httpRouteKind   = "HTTPRoute"
-	grpcRouteKind   = "GRPCRoute"
-	tlsRouteKind    = "TLSRoute"
-	gatewayAPIGroup = "gateway.networking.k8s.io"
-)
-
-// routeKindCompat lists which workload endpoint types each Gateway API route kind
-// may expose. HTTPRoute/GRPCRoute attach to the http and https gateway listeners
-// (the gateway terminates TLS on https); TLSRoute attaches to the tls listener for
-// SNI-based passthrough where the application terminates TLS. A given endpoint
-// is exposed by at most one route kind per visibility — the TLS trait swaps an
-// HTTPRoute/GRPCRoute for a TLSRoute when application-level TLS termination is
-// required.
-var routeKindCompat = map[string]map[openchoreov1alpha1.EndpointProtocol]bool{
-	httpRouteKind: {
-		openchoreov1alpha1.EndpointProtocolHTTP:      true,
-		openchoreov1alpha1.EndpointProtocolGraphQL:   true,
-		openchoreov1alpha1.EndpointProtocolWebsocket: true,
-		openchoreov1alpha1.EndpointProtocolGRPC:      true,
-	},
-	grpcRouteKind: {
-		openchoreov1alpha1.EndpointProtocolGRPC: true,
-	},
-	tlsRouteKind: {
-		openchoreov1alpha1.EndpointProtocolHTTP:      true,
-		openchoreov1alpha1.EndpointProtocolGraphQL:   true,
-		openchoreov1alpha1.EndpointProtocolWebsocket: true,
-		openchoreov1alpha1.EndpointProtocolGRPC:      true,
-		openchoreov1alpha1.EndpointProtocolTCP:       true,
-	},
-}
 
 // Reconciler reconciles a ReleaseBinding object
 type Reconciler struct {
@@ -1276,7 +1244,7 @@ func resolveEndpointURLStatuses(
 	// during the indexing pass below.
 	routableEndpoints := make(map[string]endpointMeta, len(endpoints))
 	for name, ep := range endpoints {
-		if !isRoutableEndpointType(ep.Type) {
+		if !endpointurl.IsRoutableProtocol(ep.Type) {
 			logger.Info("Skipping endpoint type not exposed by any Gateway API route",
 				"name", name, "type", ep.Type)
 			continue
@@ -1303,11 +1271,11 @@ func resolveEndpointURLStatuses(
 			continue
 		}
 
-		if obj.GetObjectKind().GroupVersionKind().Group != gatewayAPIGroup {
+		if obj.GetObjectKind().GroupVersionKind().Group != endpointurl.GatewayAPIGroup {
 			continue
 		}
 		kind := obj.GetKind()
-		compat, isRoute := routeKindCompat[kind]
+		compat, isRoute := endpointurl.RouteKindCompat[kind]
 		if !isRoute {
 			continue
 		}
@@ -1373,26 +1341,26 @@ func resolveEndpointURLStatuses(
 		}
 
 		if r := routes.external; r != nil {
-			hostname := extractFirstHostname(r.obj)
-			gwEndpoint := resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibilityExternal, environment, dataPlane)
+			hostname := endpointurl.FirstHostname(r.obj)
+			gwEndpoint := endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibilityExternal, environment, dataPlane)
 			if hostname == "" || gwEndpoint == nil {
 				logger.Info("No external gateway endpoint configured, skipping", "endpointName", name)
 			} else {
-				status.ExternalURLs = buildRouteURLs(r.kind, epType, hostname, routePath(r), gwEndpoint)
+				status.ExternalURLs = endpointurl.BuildRouteURLs(r.kind, epType, hostname, endpointurl.RoutePath(r.obj, r.kind), gwEndpoint)
 				logger.Info("Resolved external endpoint URLs",
 					"endpointName", name, "kind", r.kind, "hostname", hostname)
 			}
 		}
 
 		if r := routes.internal; r != nil {
-			hostname := extractFirstHostname(r.obj)
+			hostname := endpointurl.FirstHostname(r.obj)
 			visibilityStr := r.obj.GetLabels()[labels.LabelKeyEndpointVisibility]
-			gwEndpoint := resolveGatewayEndpointByVisibility(openchoreov1alpha1.EndpointVisibility(visibilityStr), environment, dataPlane)
+			gwEndpoint := endpointurl.GatewayEndpointForVisibility(openchoreov1alpha1.EndpointVisibility(visibilityStr), environment, dataPlane)
 			if hostname == "" || gwEndpoint == nil {
 				logger.Info("No internal gateway endpoint configured, skipping",
 					"endpointName", name, "visibility", visibilityStr)
 			} else {
-				status.InternalURLs = buildRouteURLs(r.kind, epType, hostname, routePath(r), gwEndpoint)
+				status.InternalURLs = endpointurl.BuildRouteURLs(r.kind, epType, hostname, endpointurl.RoutePath(r.obj, r.kind), gwEndpoint)
 				logger.Info("Resolved internal endpoint URLs",
 					"endpointName", name, "kind", r.kind,
 					"hostname", hostname, "visibility", visibilityStr)
@@ -1402,177 +1370,6 @@ func resolveEndpointURLStatuses(
 		result = append(result, status)
 	}
 	return result
-}
-
-// isRoutableEndpointType reports whether any route kind can expose this endpoint type.
-func isRoutableEndpointType(t openchoreov1alpha1.EndpointProtocol) bool {
-	for _, compat := range routeKindCompat {
-		if compat[t] {
-			return true
-		}
-	}
-	return false
-}
-
-// routePath returns the URL base path that clients use to reach the endpoint via
-// the gateway. A route may advertise this explicitly through the
-// openchoreo.dev/endpoint-base-path annotation; this is required for routes that
-// render one match per API resource (e.g. an HTTPRoute with an Exact match per
-// OpenAPI path), where the first match is a specific operation rather than the
-// endpoint base. When the annotation is absent, fall back to the first HTTPRoute
-// match path — the prefix-routing convention where the single match value is the
-// exposed base. GRPCRoute (method-based) and TLSRoute (SNI-based) carry no path.
-func routePath(r *indexedRoute) string {
-	if base := r.obj.GetAnnotations()[labels.AnnotationKeyEndpointBasePath]; base != "" {
-		return base
-	}
-	if r.kind == httpRouteKind {
-		return extractFirstPathValue(r.obj)
-	}
-	return ""
-}
-
-// buildRouteURLs constructs an EndpointGatewayURLs by writing into the listener
-// fields that the given route kind targets. HTTPRoute and GRPCRoute populate
-// urls.HTTP (cleartext) and urls.HTTPS (gateway-terminated TLS); TLSRoute
-// populates urls.TLS (SNI passthrough, application terminates TLS). The URL
-// scheme inside each entry is derived from the workload endpoint type — the
-// field name reflects the gateway listener, not the scheme.
-func buildRouteURLs(
-	routeKind string,
-	epType openchoreov1alpha1.EndpointProtocol,
-	hostname, path string,
-	ep *openchoreov1alpha1.GatewayEndpointSpec,
-) *openchoreov1alpha1.EndpointGatewayURLs {
-	if ep == nil {
-		return nil
-	}
-	urls := &openchoreov1alpha1.EndpointGatewayURLs{}
-	switch routeKind {
-	case httpRouteKind, grpcRouteKind:
-		if ep.HTTP != nil {
-			urls.HTTP = buildInvokeURL(schemeFor(epType, false), hostname, path, ep.HTTP.Port)
-		}
-		if ep.HTTPS != nil {
-			urls.HTTPS = buildInvokeURL(schemeFor(epType, true), hostname, path, ep.HTTPS.Port)
-		}
-	case tlsRouteKind:
-		if ep.TLS != nil {
-			urls.TLS = buildInvokeURL(schemeFor(epType, true), hostname, path, ep.TLS.Port)
-		}
-	}
-	if urls.HTTP == nil && urls.HTTPS == nil && urls.TLS == nil {
-		return nil
-	}
-	return urls
-}
-
-// schemeFor returns the URL scheme used by clients of the given endpoint type.
-// The tls flag selects between the cleartext form (over the http listener) and
-// the TLS form (over the https or tls listener). Returns "" for endpoint types
-// that don't have a meaningful URL scheme for the requested TLS variant
-// (e.g. TCP without TLS).
-func schemeFor(t openchoreov1alpha1.EndpointProtocol, tls bool) string {
-	switch t {
-	case openchoreov1alpha1.EndpointProtocolHTTP, openchoreov1alpha1.EndpointProtocolGraphQL:
-		if tls {
-			return schemeHTTPS
-		}
-		return schemeHTTP
-	case openchoreov1alpha1.EndpointProtocolWebsocket:
-		if tls {
-			return schemeWSS
-		}
-		return schemeWS
-	case openchoreov1alpha1.EndpointProtocolGRPC:
-		if tls {
-			return schemeGRPCS
-		}
-		return schemeGRPC
-	case openchoreov1alpha1.EndpointProtocolTCP:
-		if tls {
-			return schemeTLS
-		}
-	}
-	return ""
-}
-
-// buildInvokeURL constructs a single EndpointURL from the given components.
-func buildInvokeURL(scheme, hostname, path string, port int32) *openchoreov1alpha1.EndpointURL {
-	return &openchoreov1alpha1.EndpointURL{
-		Scheme: scheme,
-		Host:   hostname,
-		Port:   port,
-		Path:   path,
-	}
-}
-
-// extractFirstHostname returns the first entry of spec.hostnames[], or "" if absent.
-func extractFirstHostname(obj *unstructured.Unstructured) string {
-	hostnames, found, err := unstructured.NestedStringSlice(obj.Object, "spec", "hostnames")
-	if err != nil || !found || len(hostnames) == 0 {
-		return ""
-	}
-	return hostnames[0]
-}
-
-// extractFirstPathValue walks spec.rules[0].matches[0].path.value and returns the path string.
-// Returns "" when the HTTPRoute has no path match rule (e.g. root-path webapps).
-func extractFirstPathValue(obj *unstructured.Unstructured) string {
-	rules, found, err := unstructured.NestedSlice(obj.Object, "spec", "rules")
-	if err != nil || !found || len(rules) == 0 {
-		return ""
-	}
-
-	firstRule, ok := rules[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-
-	matches, found, err := unstructured.NestedSlice(firstRule, "matches")
-	if err != nil || !found || len(matches) == 0 {
-		return ""
-	}
-
-	firstMatch, ok := matches[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-
-	value, _, _ := unstructured.NestedString(firstMatch, "path", "value")
-	return value
-}
-
-// resolveGatewayEndpointByVisibility returns the GatewayEndpointSpec for the ingress gateway
-// based on endpoint visibility. External visibility maps to the external gateway endpoint;
-// all other visibilities (internal, namespace, project) map to the internal gateway endpoint.
-// Environment-level gateway configuration takes precedence over dataplane-level configuration.
-// Returns nil if no gateway endpoint is configured for the given visibility.
-func resolveGatewayEndpointByVisibility(
-	visibility openchoreov1alpha1.EndpointVisibility,
-	env *openchoreov1alpha1.Environment,
-	dp *openchoreov1alpha1.DataPlane,
-) *openchoreov1alpha1.GatewayEndpointSpec {
-	if dp == nil {
-		return nil
-	}
-
-	// Use environment-level gateway config if present, otherwise fall back to dataplane.
-	spec := dp.Spec.Gateway
-	if env != nil && env.Spec.Gateway.Ingress != nil {
-		spec = env.Spec.Gateway
-	}
-
-	// If no ingress configured, we can't resolve an endpoint as we don't support egress gateways.
-	// TODO: (lahirude@wso2.com) Add support for egress gateway endpoints and update this logic accordingly.
-	if spec.Ingress == nil {
-		return nil
-	}
-
-	if visibility == openchoreov1alpha1.EndpointVisibilityExternal {
-		return spec.Ingress.External
-	}
-	return spec.Ingress.Internal
 }
 
 // getDefaultNotificationChannelName returns the default ObservabilityAlertsNotificationChannel name for an environment.

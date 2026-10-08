@@ -84,11 +84,13 @@ type RenderedReleaseList struct {
 // is always required. The optional name fields disambiguate the binding kind:
 //   - ComponentName set: produced by a ReleaseBinding (component)
 //   - ResourceName set:  produced by a ResourceReleaseBinding
-//   - Both unset:        produced by a ProjectReleaseBinding (project-level
+//   - EndpointName set:  produced by an EndpointReleaseBinding
+//   - All unset:         produced by a ProjectReleaseBinding (project-level
 //     infra including the cell namespace)
 //
-// At most one of ComponentName or ResourceName may be set.
+// At most one of ComponentName, ResourceName or EndpointName may be set.
 // +kubebuilder:validation:XValidation:rule="!(has(self.componentName) && has(self.resourceName))",message="componentName and resourceName both cannot be set"
+// +kubebuilder:validation:XValidation:rule="(has(self.componentName)?1:0) + (has(self.resourceName)?1:0) + (has(self.endpointName)?1:0) <= 1",message="at most one of componentName, resourceName or endpointName may be set"
 type RenderedReleaseOwner struct {
 	// ProjectName is the name of the Project the owner belongs to.
 	// +kubebuilder:validation:MinLength=1
@@ -101,6 +103,11 @@ type RenderedReleaseOwner struct {
 	// (via ResourceReleaseBinding). Mutually exclusive with ComponentName.
 	// +optional
 	ResourceName string `json:"resourceName,omitempty"`
+	// EndpointName is set when the RenderedRelease is owned by an Endpoint
+	// (via EndpointReleaseBinding). Mutually exclusive with ComponentName and
+	// ResourceName.
+	// +optional
+	EndpointName string `json:"endpointName,omitempty"`
 }
 
 // RenderedManifest defines a Kubernetes resource template that can be applied to the data plane.
