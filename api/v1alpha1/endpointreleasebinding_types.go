@@ -84,6 +84,62 @@ type EndpointReleaseBindingStatus struct {
 	// ExternalURLs holds the resolved external gateway URLs.
 	// +optional
 	ExternalURLs *EndpointGatewayURLs `json:"externalURLs,omitempty"`
+
+	// Serving records the routing last confirmed accepted on the data plane. It
+	// is this binding's claim on its backends' workload endpoints: component
+	// ReleaseBindings stop rendering their own gateway routes for the claimed
+	// (component, endpoint, visibility) slots. It changes only when a newly
+	// rendered route is accepted, so it holds steady while a later render is
+	// still progressing or its backends are unresolved.
+	// +optional
+	Serving *EndpointServingClaim `json:"serving,omitempty"`
+}
+
+// EndpointServingClaim is the routing an EndpointReleaseBinding is serving in
+// its environment, and therefore the routing slots it claims.
+type EndpointServingClaim struct {
+	// EndpointRelease is the release whose rendered routes were accepted.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	EndpointRelease string `json:"endpointRelease"`
+
+	// Backends are the component workload endpoints receiving traffic (non-zero
+	// weight) through the accepted routes.
+	// +optional
+	// +listType=map
+	// +listMapKey=componentName
+	// +listMapKey=endpoint
+	Backends []EndpointBackendSlot `json:"backends,omitempty"`
+
+	// Visibilities are the gateway visibilities the accepted routes serve, from
+	// their openchoreo.dev/endpoint-visibility label (external by default).
+	// Component routes of other visibilities are left in place.
+	// +optional
+	// +listType=set
+	Visibilities []EndpointVisibility `json:"visibilities,omitempty"`
+
+	// Since is when this claim was first established.
+	// +kubebuilder:validation:Required
+	Since metav1.Time `json:"since"`
+
+	// Releasing is set while the binding is being deleted. Component
+	// ReleaseBindings resume rendering their own routes; this binding keeps its
+	// route until they are live again, so traffic is never left without a route.
+	// +optional
+	Releasing bool `json:"releasing,omitempty"`
+}
+
+// EndpointBackendSlot identifies a component workload endpoint.
+type EndpointBackendSlot struct {
+	// ComponentName is the name of the backend Component.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	ComponentName string `json:"componentName"`
+
+	// Endpoint is the name of the workload endpoint on the Component.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Endpoint string `json:"endpoint"`
 }
 
 // ResolvedEndpointBackend is the resolution of a single EndpointBackendRef in an

@@ -6,9 +6,11 @@ package endpointreleasebinding
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,10 +20,12 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/controller"
+	"github.com/openchoreo/openchoreo/internal/controller/renderedrelease"
 	dpkubernetes "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes"
 	"github.com/openchoreo/openchoreo/internal/labels"
 	endpointpipeline "github.com/openchoreo/openchoreo/internal/pipeline/endpoint"
@@ -175,7 +179,35 @@ func buildClient(objs ...client.Object) client.Client {
 		WithIndex(&openchoreov1alpha1.EndpointReleaseBinding{}, controller.IndexKeyEndpointReleaseBindingOwnerEnv,
 			controller.IndexEndpointReleaseBindingOwnerEnv).
 		WithIndex(&openchoreov1alpha1.EndpointReleaseBinding{}, endpointReleaseRefIndex, indexEndpointReleaseRef).
+		WithInterceptorFuncs(renderedReleaseGenerations()).
 		Build()
+}
+
+// renderedReleaseGenerations makes the fake client track metadata.generation
+// for RenderedReleases the way the API server does: 1 on create, +1 on every
+// spec change. The fake client leaves it at 0, which would hide whether the
+// controller waits for the data plane to apply the generation it just wrote.
+func renderedReleaseGenerations() interceptor.Funcs {
+	return interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, ok := obj.(*openchoreov1alpha1.RenderedRelease); ok {
+				obj.SetGeneration(1)
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			if rr, ok := obj.(*openchoreov1alpha1.RenderedRelease); ok {
+				current := &openchoreov1alpha1.RenderedRelease{}
+				if err := c.Get(ctx, client.ObjectKeyFromObject(rr), current); err == nil {
+					rr.SetGeneration(current.Generation)
+					if !apiequality.Semantic.DeepEqual(current.Spec, rr.Spec) {
+						rr.SetGeneration(current.Generation + 1)
+					}
+				}
+			}
+			return c.Update(ctx, obj, opts...)
+		},
+	}
 }
 
 var _ = Describe("EndpointReleaseBinding Controller", func() {
@@ -204,6 +236,20 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		rr := &openchoreov1alpha1.RenderedRelease{}
 		Expect(cli.Get(bctx, types.NamespacedName{Name: makeRenderedReleaseName(b), Namespace: testNS}, rr)).To(Succeed())
 		return rr
+	}
+
+	// markApplied records what the data-plane RenderedRelease controller writes
+	// once it has applied a generation: ResourcesApplied=True for it, plus the
+	// given per-resource health.
+	markApplied := func(rr *openchoreov1alpha1.RenderedRelease, health openchoreov1alpha1.HealthStatus) {
+		rr.Status.Conditions = []metav1.Condition{{
+			Type: renderedrelease.ConditionResourcesApplied, Status: metav1.ConditionTrue,
+			Reason: "ResourcesApplied", ObservedGeneration: rr.Generation, LastTransitionTime: metav1.Now(),
+		}}
+		rr.Status.Resources = []openchoreov1alpha1.RenderedManifestStatus{{
+			ID: "route", Kind: "HTTPRoute", HealthStatus: health,
+		}}
+		Expect(cli.Status().Update(bctx, rr)).To(Succeed())
 	}
 
 	routeBackendRefs := func(rr *openchoreov1alpha1.RenderedRelease) string {
@@ -263,10 +309,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		Expect(condition(b, string(ConditionReady)).Status).To(Equal(metav1.ConditionFalse))
 
 		By("becoming Ready once the route reports healthy")
-		rr.Status.Resources = []openchoreov1alpha1.RenderedManifestStatus{{
-			ID: "route", Kind: "HTTPRoute", HealthStatus: openchoreov1alpha1.HealthStatusHealthy,
-		}}
-		Expect(cli.Status().Update(bctx, rr)).To(Succeed())
+		markApplied(rr, openchoreov1alpha1.HealthStatusHealthy)
 
 		b = reconcileBinding()
 		Expect(condition(b, string(ConditionRoutesReady)).Status).To(Equal(metav1.ConditionTrue))
@@ -279,10 +322,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 
 		b := reconcileBinding()
 		rr := getRenderedRelease(b)
-		rr.Status.Resources = []openchoreov1alpha1.RenderedManifestStatus{{
-			ID: "route", Kind: "HTTPRoute", HealthStatus: openchoreov1alpha1.HealthStatusDegraded,
-		}}
-		Expect(cli.Status().Update(bctx, rr)).To(Succeed())
+		markApplied(rr, openchoreov1alpha1.HealthStatusDegraded)
 
 		b = reconcileBinding()
 		routes := condition(b, string(ConditionRoutesReady))
@@ -404,6 +444,184 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		Expect(reqs).To(ConsistOf(reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: "checkout-api-dev", Namespace: testNS},
 		}))
+	})
+
+	Context("serving claim", func() {
+		slot := func(component string) openchoreov1alpha1.EndpointBackendSlot {
+			return openchoreov1alpha1.EndpointBackendSlot{ComponentName: component, Endpoint: "api"}
+		}
+
+		// claimFor reconciles the binding to an applied, healthy route and returns it.
+		claimFor := func() *openchoreov1alpha1.EndpointReleaseBinding {
+			b := reconcileBinding()
+			markApplied(getRenderedRelease(b), openchoreov1alpha1.HealthStatusHealthy)
+			return reconcileBinding()
+		}
+
+		// componentLegacyRR is a component's data-plane RenderedRelease carrying its
+		// own external route for workload endpoint "api".
+		componentLegacyRR := func(component string, health openchoreov1alpha1.HealthStatus) *openchoreov1alpha1.RenderedRelease {
+			rr := &openchoreov1alpha1.RenderedRelease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      component + "-" + testEnvName,
+					Namespace: testNS,
+					Labels: map[string]string{
+						labels.LabelKeyProjectName:     testProject,
+						labels.LabelKeyComponentName:   component,
+						labels.LabelKeyEnvironmentName: testEnvName,
+					},
+				},
+				Spec: openchoreov1alpha1.RenderedReleaseSpec{
+					Owner:           openchoreov1alpha1.RenderedReleaseOwner{ProjectName: testProject, ComponentName: component},
+					EnvironmentName: testEnvName,
+					TargetPlane:     openchoreov1alpha1.TargetPlaneDataPlane,
+					Resources: []openchoreov1alpha1.RenderedManifest{{
+						ID: "httproute-external",
+						Object: mustRaw(map[string]any{
+							"apiVersion": "gateway.networking.k8s.io/v1",
+							"kind":       "HTTPRoute",
+							"metadata": map[string]any{
+								"name": component + "-api",
+								"labels": map[string]any{
+									"openchoreo.dev/endpoint-name":       "api",
+									"openchoreo.dev/endpoint-visibility": "external",
+								},
+							},
+						}),
+					}},
+				},
+			}
+			Expect(cli.Create(bctx, rr)).To(Succeed())
+			rr.Status.Conditions = []metav1.Condition{{
+				Type: renderedrelease.ConditionResourcesApplied, Status: metav1.ConditionTrue,
+				Reason: "ResourcesApplied", ObservedGeneration: rr.Generation, LastTransitionTime: metav1.Now(),
+			}}
+			rr.Status.Resources = []openchoreov1alpha1.RenderedManifestStatus{{
+				ID: "httproute-external", Kind: "HTTPRoute", HealthStatus: health,
+			}}
+			Expect(cli.Status().Update(bctx, rr)).To(Succeed())
+			return rr
+		}
+
+		It("is set only once the data plane has applied and accepted the route", func() {
+			setup(newRelease("rel-1", refs...), newBinding("rel-1"),
+				componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			Expect(b.Status.Serving).To(BeNil(), "no claim before the route is applied")
+
+			b = claimFor()
+			Expect(b.Status.Serving).NotTo(BeNil())
+			Expect(b.Status.Serving.EndpointRelease).To(Equal("rel-1"))
+			Expect(b.Status.Serving.Backends).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1"), slot("payments-v2")}))
+			Expect(b.Status.Serving.Visibilities).To(Equal([]openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal}))
+			Expect(b.Status.Serving.Releasing).To(BeFalse())
+		})
+
+		It("holds while a newer release cannot be routed, and moves once it is accepted", func() {
+			setup(newRelease("rel-1", refs[0]), newRelease("rel-2", refs...), newBinding("rel-1"),
+				componentBinding("payments-v1"))
+
+			b := claimFor()
+			Expect(b.Status.Serving.Backends).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1")}))
+			since := b.Status.Serving.Since
+
+			By("pinning rel-2 while payments-v2 is missing keeps the rel-1 claim")
+			b.Spec.EndpointRelease = "rel-2"
+			Expect(cli.Update(bctx, b)).To(Succeed())
+			b = reconcileBinding()
+			Expect(condition(b, string(ConditionBackendsResolved)).Status).To(Equal(metav1.ConditionFalse))
+			Expect(b.Status.Serving.EndpointRelease).To(Equal("rel-1"))
+
+			By("once payments-v2 is deployed the new route renders, but the claim waits for the data plane")
+			Expect(cli.Create(bctx, componentBinding("payments-v2"))).To(Succeed())
+			b = reconcileBinding()
+			Expect(b.Status.Serving.EndpointRelease).To(Equal("rel-1"))
+
+			By("the accepted rel-2 route replaces the claim and keeps its start time")
+			markApplied(getRenderedRelease(b), openchoreov1alpha1.HealthStatusHealthy)
+			b = reconcileBinding()
+			Expect(b.Status.Serving.EndpointRelease).To(Equal("rel-2"))
+			Expect(b.Status.Serving.Backends).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1"), slot("payments-v2")}))
+			Expect(b.Status.Serving.Since).To(Equal(since))
+		})
+
+		It("hands slots back before removing its route on deletion", func() {
+			setup(newRelease("rel-1", refs[0]), newBinding("rel-1"), componentBinding("payments-v1"))
+			b := claimFor()
+			key := types.NamespacedName{Name: b.Name, Namespace: testNS}
+			rrKey := types.NamespacedName{Name: makeRenderedReleaseName(b), Namespace: testNS}
+
+			reconcileOnce := func() {
+				_, err := reconciler.Reconcile(bctx, reconcile.Request{NamespacedName: key})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			By("the component still reports the Endpoint as routing its endpoint")
+			comp := &openchoreov1alpha1.ReleaseBinding{}
+			Expect(cli.Get(bctx, types.NamespacedName{Name: "payments-v1-" + testEnvName, Namespace: testNS}, comp)).To(Succeed())
+			comp.Status.Endpoints[0].RoutedBy = []openchoreov1alpha1.EndpointRouteOwner{{EndpointName: testEP}}
+			Expect(cli.Status().Update(bctx, comp)).To(Succeed())
+
+			Expect(cli.Delete(bctx, b)).To(Succeed())
+			reconcileOnce() // Finalizing
+			reconcileOnce() // claim marked releasing
+
+			b = &openchoreov1alpha1.EndpointReleaseBinding{}
+			Expect(cli.Get(bctx, key, b)).To(Succeed())
+			Expect(b.Status.Serving.Releasing).To(BeTrue())
+
+			By("the route stays while the component has not re-rendered its own")
+			reconcileOnce()
+			Expect(cli.Get(bctx, rrKey, &openchoreov1alpha1.RenderedRelease{})).To(Succeed())
+			Expect(cli.Get(bctx, key, b)).To(Succeed())
+			Expect(condition(b, string(ConditionFinalizing)).Reason).To(Equal(string(ReasonReleasingClaims)))
+
+			By("and while the component's own route is not healthy yet")
+			Expect(cli.Get(bctx, types.NamespacedName{Name: "payments-v1-" + testEnvName, Namespace: testNS}, comp)).To(Succeed())
+			comp.Status.Endpoints[0].RoutedBy = nil
+			Expect(cli.Status().Update(bctx, comp)).To(Succeed())
+			legacy := componentLegacyRR("payments-v1", openchoreov1alpha1.HealthStatusProgressing)
+			reconcileOnce()
+			Expect(cli.Get(bctx, rrKey, &openchoreov1alpha1.RenderedRelease{})).To(Succeed())
+
+			By("once it is healthy, the Endpoint route is removed and the binding goes away")
+			legacy.Status.Resources[0].HealthStatus = openchoreov1alpha1.HealthStatusHealthy
+			Expect(cli.Status().Update(bctx, legacy)).To(Succeed())
+			reconcileOnce()
+			Expect(apierrors.IsNotFound(cli.Get(bctx, rrKey, &openchoreov1alpha1.RenderedRelease{}))).To(BeTrue())
+			reconcileOnce()
+			Expect(apierrors.IsNotFound(cli.Get(bctx, key, &openchoreov1alpha1.EndpointReleaseBinding{}))).To(BeTrue())
+		})
+
+		It("stops waiting after the release timeout", func() {
+			b := newBinding("rel-1")
+			b.DeletionTimestamp = &metav1.Time{Time: time.Now().Add(-claimReleaseTimeout - time.Minute)}
+			b.Status.Conditions = []metav1.Condition{NewFinalizingCondition(0)}
+			b.Status.Serving = &openchoreov1alpha1.EndpointServingClaim{
+				EndpointRelease: "rel-1",
+				Backends:        []openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1")},
+				Visibilities:    []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal},
+				Since:           metav1.Now(),
+				Releasing:       true,
+			}
+			comp := componentBinding("payments-v1")
+			comp.Status.Endpoints[0].RoutedBy = []openchoreov1alpha1.EndpointRouteOwner{{EndpointName: testEP}}
+			rr := &openchoreov1alpha1.RenderedRelease{
+				ObjectMeta: metav1.ObjectMeta{Name: makeRenderedReleaseName(b), Namespace: testNS},
+				Spec: openchoreov1alpha1.RenderedReleaseSpec{
+					Owner:           openchoreov1alpha1.RenderedReleaseOwner{ProjectName: testProject, EndpointName: testEP},
+					EnvironmentName: testEnvName,
+					TargetPlane:     openchoreov1alpha1.TargetPlaneDataPlane,
+				},
+			}
+			setup(b, comp, rr)
+
+			_, err := reconciler.Reconcile(bctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: b.Name, Namespace: testNS}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(apierrors.IsNotFound(cli.Get(bctx, client.ObjectKeyFromObject(rr), &openchoreov1alpha1.RenderedRelease{}))).
+				To(BeTrue(), "the Endpoint route is removed even though the component never re-rendered")
+		})
 	})
 })
 

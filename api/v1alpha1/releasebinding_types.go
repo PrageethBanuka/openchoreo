@@ -279,6 +279,28 @@ type EndpointURLStatus struct {
 	// ExternalURLs holds the resolved external gateway URLs.
 	// +optional
 	ExternalURLs *EndpointGatewayURLs `json:"externalURLs,omitempty"`
+
+	// RoutedBy lists the Endpoints whose routes serve this workload endpoint's
+	// gateway traffic in this environment. For the visibilities they claim, the
+	// component's own gateway routes are not rendered, and InternalURLs /
+	// ExternalURLs are the Endpoint's.
+	// +optional
+	// +listType=map
+	// +listMapKey=endpointName
+	RoutedBy []EndpointRouteOwner `json:"routedBy,omitempty"`
+}
+
+// EndpointRouteOwner is an Endpoint that routes traffic to a workload endpoint.
+type EndpointRouteOwner struct {
+	// EndpointName is the name of the Endpoint.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	EndpointName string `json:"endpointName"`
+
+	// Visibilities are the gateway visibilities the Endpoint serves.
+	// +optional
+	// +listType=set
+	Visibilities []EndpointVisibility `json:"visibilities,omitempty"`
 }
 
 // ReleaseBindingStatus defines the observed state of ReleaseBinding.

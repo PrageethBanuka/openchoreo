@@ -96,6 +96,17 @@ func evaluateRoutesReady(binding *openchoreov1alpha1.EndpointReleaseBinding, rr 
 		return
 	}
 
+	// Per-resource health describes whatever the data plane last applied. Until
+	// the RenderedRelease reports this generation applied, that is the previous
+	// render, and must not count as this render being ready.
+	if applyCond := meta.FindStatusCondition(rr.Status.Conditions, renderedrelease.ConditionResourcesApplied); applyCond == nil ||
+		applyCond.Status != metav1.ConditionTrue ||
+		applyCond.ObservedGeneration != rr.Generation {
+		controller.MarkFalseCondition(binding, ConditionRoutesReady, ReasonRoutesProgressing,
+			fmt.Sprintf("Waiting for the data plane to apply RenderedRelease generation %d", rr.Generation))
+		return
+	}
+
 	statusByID := make(map[string]*openchoreov1alpha1.RenderedManifestStatus, len(rr.Status.Resources))
 	for i := range rr.Status.Resources {
 		statusByID[rr.Status.Resources[i].ID] = &rr.Status.Resources[i]

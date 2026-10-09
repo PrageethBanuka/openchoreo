@@ -399,6 +399,77 @@ spec:
                   InvokeURL is the primary resolved URL for this endpoint in the environment,
                   derived from the rendered routing resources.
                 type: string
+              serving:
+                description: |-
+                  Serving records the routing last confirmed accepted on the data plane. It
+                  is this binding's claim on its backends' workload endpoints: component
+                  ReleaseBindings stop rendering their own gateway routes for the claimed
+                  (component, endpoint, visibility) slots. It changes only when a newly
+                  rendered route is accepted, so it holds steady while a later render is
+                  still progressing or its backends are unresolved.
+                properties:
+                  backends:
+                    description: |-
+                      Backends are the component workload endpoints receiving traffic (non-zero
+                      weight) through the accepted routes.
+                    items:
+                      description: EndpointBackendSlot identifies a component workload
+                        endpoint.
+                      properties:
+                        componentName:
+                          description: ComponentName is the name of the backend Component.
+                          minLength: 1
+                          type: string
+                        endpoint:
+                          description: Endpoint is the name of the workload endpoint
+                            on the Component.
+                          minLength: 1
+                          type: string
+                      required:
+                      - componentName
+                      - endpoint
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - componentName
+                    - endpoint
+                    x-kubernetes-list-type: map
+                  endpointRelease:
+                    description: EndpointRelease is the release whose rendered routes
+                      were accepted.
+                    minLength: 1
+                    type: string
+                  releasing:
+                    description: |-
+                      Releasing is set while the binding is being deleted. Component
+                      ReleaseBindings resume rendering their own routes; this binding keeps its
+                      route until they are live again, so traffic is never left without a route.
+                    type: boolean
+                  since:
+                    description: Since is when this claim was first established.
+                    format: date-time
+                    type: string
+                  visibilities:
+                    description: |-
+                      Visibilities are the gateway visibilities the accepted routes serve, from
+                      their openchoreo.dev/endpoint-visibility label (external by default).
+                      Component routes of other visibilities are left in place.
+                    items:
+                      description: |-
+                        EndpointVisibility defines the visibility scope for an endpoint.
+                        It determines which components can access the endpoint and how that access is enforced at runtime.
+                      enum:
+                      - project
+                      - namespace
+                      - internal
+                      - external
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                required:
+                - endpointRelease
+                - since
+                type: object
             type: object
         type: object
     served: true

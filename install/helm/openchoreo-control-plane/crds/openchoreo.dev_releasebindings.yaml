@@ -533,6 +533,42 @@ spec:
                       description: Name is the endpoint name as defined in the Workload
                         spec.
                       type: string
+                    routedBy:
+                      description: |-
+                        RoutedBy lists the Endpoints whose routes serve this workload endpoint's
+                        gateway traffic in this environment. For the visibilities they claim, the
+                        component's own gateway routes are not rendered, and InternalURLs /
+                        ExternalURLs are the Endpoint's.
+                      items:
+                        description: EndpointRouteOwner is an Endpoint that routes
+                          traffic to a workload endpoint.
+                        properties:
+                          endpointName:
+                            description: EndpointName is the name of the Endpoint.
+                            minLength: 1
+                            type: string
+                          visibilities:
+                            description: Visibilities are the gateway visibilities
+                              the Endpoint serves.
+                            items:
+                              description: |-
+                                EndpointVisibility defines the visibility scope for an endpoint.
+                                It determines which components can access the endpoint and how that access is enforced at runtime.
+                              enum:
+                              - project
+                              - namespace
+                              - internal
+                              - external
+                              type: string
+                            type: array
+                            x-kubernetes-list-type: set
+                        required:
+                        - endpointName
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - endpointName
+                      x-kubernetes-list-type: map
                     serviceURL:
                       description: ServiceURL is the in-cluster service URL for this
                         endpoint.

@@ -154,6 +154,7 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 
 	resolveURLs(ctx, binding, in, output, resolution.backends)
 	evaluateRoutesReady(binding, rr)
+	updateServingClaim(binding, in.release, output, resolution.backends)
 	return ctrl.Result{}, nil
 }
 

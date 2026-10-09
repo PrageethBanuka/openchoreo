@@ -104,6 +104,15 @@ const (
 
 	// ReasonFinalizing indicates the binding is being finalized.
 	ReasonFinalizing controller.ConditionReason = "Finalizing"
+
+	// ReasonReleasingClaims indicates a deleting binding has handed its routing
+	// slots back and is waiting for the component routes to be live before
+	// removing its own route.
+	ReasonReleasingClaims controller.ConditionReason = "ReleasingClaims"
+
+	// ReasonReleaseTimedOut indicates the component routes were not live within
+	// the release timeout, and the binding's route is being removed anyway.
+	ReasonReleaseTimedOut controller.ConditionReason = "ReleaseTimedOut"
 )
 
 // NewFinalizingCondition returns a Finalizing=True condition observed at the
