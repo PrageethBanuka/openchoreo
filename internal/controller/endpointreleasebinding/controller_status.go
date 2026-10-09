@@ -111,6 +111,10 @@ func evaluateRoutesReady(binding *openchoreov1alpha1.EndpointReleaseBinding, rr 
 		}
 		switch st.HealthStatus {
 		case openchoreov1alpha1.HealthStatusHealthy, openchoreov1alpha1.HealthStatusSuspended:
+		case openchoreov1alpha1.HealthStatusDegraded:
+			controller.MarkFalseCondition(binding, ConditionRoutesReady, ReasonRoutesDegraded,
+				fmt.Sprintf("Resource %q (%s) is degraded", id, st.Kind))
+			return
 		default:
 			controller.MarkFalseCondition(binding, ConditionRoutesReady, ReasonRoutesProgressing,
 				fmt.Sprintf("Resource %q (%s) is %s", id, st.Kind, st.HealthStatus))

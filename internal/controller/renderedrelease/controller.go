@@ -40,6 +40,11 @@ const (
 	batchAPIGroup = "batch"
 	cronJobKind   = "CronJob"
 
+	gatewayAPIGroup = "gateway.networking.k8s.io"
+	httpRouteKind   = "HTTPRoute"
+	grpcRouteKind   = "GRPCRoute"
+	tlsRouteKind    = "TLSRoute"
+
 	// reasonProgressDeadlineExceeded is the Deployment Progressing condition reason
 	// Kubernetes sets when a rollout exceeds progressDeadlineSeconds.
 	reasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"

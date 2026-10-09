@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -251,7 +252,9 @@ func kindHealthCheckFunc(gvk schema.GroupVersionKind) (func(obj *unstructured.Un
 		return getPodHealth, true
 	case gvk.Group == batchAPIGroup && gvk.Kind == cronJobKind:
 		return getCronJobHealth, true
-		// TODO: Add gateway http route health check, and other resources as needed
+	case gvk.Group == gatewayAPIGroup && (gvk.Kind == httpRouteKind || gvk.Kind == grpcRouteKind || gvk.Kind == tlsRouteKind):
+		return getGatewayRouteHealth, true
+		// TODO: Add other resources as needed
 	}
 	return nil, false
 }
@@ -460,6 +463,131 @@ func getCronJobHealth(obj *unstructured.Unstructured) (openchoreov1alpha1.Health
 
 	// CronJob hasn't run yet - could be newly created or waiting for schedule
 	return openchoreov1alpha1.HealthStatusProgressing, nil
+}
+
+// routeStatusGracePeriod is how long a Gateway API route may go without a
+// usable verdict from its gateway before health stops waiting for one. It covers
+// two cases: gateway implementations that never write route status (a route
+// with no status.parents is then treated as Healthy once it is this old), and
+// transient rejections such as ResolvedRefs=False while the backend Service is
+// still being created alongside the route.
+const routeStatusGracePeriod = 60 * time.Second
+
+// routeHealthNow is the clock used for route health grace periods. Overridden in tests.
+var routeHealthNow = time.Now
+
+// getGatewayRouteHealth derives the health of an HTTPRoute, GRPCRoute or
+// TLSRoute from the status its gateway writes per parent.
+//
+//   - Healthy: every parentRef has a parent status reporting Accepted=True (and
+//     no ResolvedRefs=False) for the current generation.
+//   - Degraded: a parent reports Accepted=False or ResolvedRefs=False for the
+//     current generation, and has done so for longer than the grace period.
+//   - Progressing: the gateway has not evaluated the current generation yet, or
+//     a rejection is still within the grace period.
+//
+// A route with no parent status at all is Progressing until it is older than
+// the grace period, then Healthy: the gateway in use does not report route
+// status, so presence is the best available signal (the previous behavior).
+func getGatewayRouteHealth(obj *unstructured.Unstructured) (openchoreov1alpha1.HealthStatus, error) {
+	parents, _, err := unstructured.NestedSlice(obj.Object, "status", "parents")
+	if err != nil {
+		return openchoreov1alpha1.HealthStatusUnknown, fmt.Errorf("failed to read route status.parents: %w", err)
+	}
+
+	if len(parents) == 0 {
+		if routeHealthNow().Sub(obj.GetCreationTimestamp().Time) < routeStatusGracePeriod {
+			return openchoreov1alpha1.HealthStatusProgressing, nil
+		}
+		return openchoreov1alpha1.HealthStatusHealthy, nil
+	}
+
+	generation := obj.GetGeneration()
+	accepted := 0
+	rejected := false
+	for _, p := range parents {
+		parent, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawConditions, _, _ := unstructured.NestedSlice(parent, "conditions")
+		conditions := toConditions(rawConditions)
+
+		acceptedCond := currentCondition(conditions, "Accepted", generation)
+		if acceptedCond == nil {
+			// Not evaluated for this generation yet.
+			continue
+		}
+		resolvedCond := currentCondition(conditions, "ResolvedRefs", generation)
+
+		switch {
+		case acceptedCond.Status == metav1.ConditionFalse:
+			if rejectionSettled(acceptedCond) {
+				rejected = true
+			}
+		case resolvedCond != nil && resolvedCond.Status == metav1.ConditionFalse:
+			if rejectionSettled(resolvedCond) {
+				rejected = true
+			}
+		case acceptedCond.Status == metav1.ConditionTrue:
+			accepted++
+		}
+	}
+
+	if rejected {
+		return openchoreov1alpha1.HealthStatusDegraded, nil
+	}
+
+	required, _, _ := unstructured.NestedSlice(obj.Object, "spec", "parentRefs")
+	if accepted > 0 && accepted >= len(required) {
+		return openchoreov1alpha1.HealthStatusHealthy, nil
+	}
+	return openchoreov1alpha1.HealthStatusProgressing, nil
+}
+
+// toConditions decodes a route parent's conditions, skipping malformed entries.
+func toConditions(raw []any) []metav1.Condition {
+	conditions := make([]metav1.Condition, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		var c metav1.Condition
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &c); err != nil {
+			continue
+		}
+		conditions = append(conditions, c)
+	}
+	return conditions
+}
+
+// currentCondition returns the condition of the given type if it was observed
+// for the given generation. Conditions without observedGeneration are taken as
+// current, since the field is optional for implementations.
+func currentCondition(conditions []metav1.Condition, conditionType string, generation int64) *metav1.Condition {
+	for i := range conditions {
+		c := &conditions[i]
+		if c.Type != conditionType {
+			continue
+		}
+		if c.ObservedGeneration != 0 && generation != 0 && c.ObservedGeneration < generation {
+			return nil
+		}
+		return c
+	}
+	return nil
+}
+
+// rejectionSettled reports whether a False condition has persisted past the
+// grace period. A route and its backend Service are applied together, so a
+// gateway can briefly report ResolvedRefs=False before the Service exists; that
+// must not mark the route Degraded.
+func rejectionSettled(c *metav1.Condition) bool {
+	if c.Reason == "Pending" {
+		return false
+	}
+	return routeHealthNow().Sub(c.LastTransitionTime.Time) >= routeStatusGracePeriod
 }
 
 func getUnknownResourceHealth(obj *unstructured.Unstructured) (openchoreov1alpha1.HealthStatus, error) {

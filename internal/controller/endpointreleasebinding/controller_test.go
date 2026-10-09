@@ -273,6 +273,25 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		Expect(condition(b, string(ConditionReady)).Status).To(Equal(metav1.ConditionTrue))
 	})
 
+	It("reports RoutesDegraded when the data plane marks the route degraded", func() {
+		setup(newRelease("rel-1", refs...), newBinding("rel-1"),
+			componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+		b := reconcileBinding()
+		rr := getRenderedRelease(b)
+		rr.Status.Resources = []openchoreov1alpha1.RenderedManifestStatus{{
+			ID: "route", Kind: "HTTPRoute", HealthStatus: openchoreov1alpha1.HealthStatusDegraded,
+		}}
+		Expect(cli.Status().Update(bctx, rr)).To(Succeed())
+
+		b = reconcileBinding()
+		routes := condition(b, string(ConditionRoutesReady))
+		Expect(routes.Status).To(Equal(metav1.ConditionFalse))
+		Expect(routes.Reason).To(Equal(string(ReasonRoutesDegraded)))
+		Expect(routes.Message).To(ContainSubstring(`"route" (HTTPRoute) is degraded`))
+		Expect(condition(b, string(ConditionReady)).Reason).To(Equal(string(ReasonRoutesDegraded)))
+	})
+
 	It("keeps the previous route when a weighted backend is not deployed in the environment", func() {
 		setup(newRelease("rel-1", refs[0]), newRelease("rel-2", refs...), newBinding("rel-1"),
 			componentBinding("payments-v1"))

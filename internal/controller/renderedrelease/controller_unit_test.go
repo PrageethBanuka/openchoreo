@@ -517,6 +517,27 @@ func TestGetHealthCheckFunc(t *testing.T) {
 			wantNonNil: true,
 		},
 		{
+			name:       "gateway/HTTPRoute",
+			gvk:        schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "HTTPRoute"},
+			wantNonNil: true,
+		},
+		{
+			name:       "gateway/GRPCRoute",
+			gvk:        schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "GRPCRoute"},
+			wantNonNil: true,
+		},
+		{
+			name:       "gateway/TLSRoute",
+			gvk:        schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Kind: "TLSRoute"},
+			wantNonNil: true,
+		},
+		{
+			name:        "gateway/Gateway uses unknown health function",
+			gvk:         schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "Gateway"},
+			wantNonNil:  true,
+			wantUnknown: true,
+		},
+		{
 			name:        "unknown resource returns non-nil health function",
 			gvk:         schema.GroupVersionKind{Group: "custom.io", Version: "v1", Kind: "Widget"},
 			wantNonNil:  true,
@@ -1036,6 +1057,172 @@ func TestGetCronJobHealth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := makeCJ(tt.cronJob)
 			got, err := getCronJobHealth(obj)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("expected %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+// ─────────────────────────────────────────────────────────────
+// getGatewayRouteHealth
+// ─────────────────────────────────────────────────────────────
+
+type routeCondition struct {
+	condType  string
+	status    string
+	reason    string
+	observed  int64
+	changedAt time.Time
+}
+
+// makeRoute builds an HTTPRoute with the given generation, creation time and
+// number of parentRefs, plus one status.parents entry per conditions slice.
+func makeRoute(generation int64, created time.Time, parentRefs int, parents ...[]routeCondition) *unstructured.Unstructured {
+	refs := make([]any, parentRefs)
+	for i := range refs {
+		refs[i] = map[string]any{"name": "gateway-default"}
+	}
+
+	statusParents := make([]any, 0, len(parents))
+	for _, conds := range parents {
+		items := make([]any, 0, len(conds))
+		for _, c := range conds {
+			item := map[string]any{
+				"type":               c.condType,
+				"status":             c.status,
+				"reason":             c.reason,
+				"message":            "",
+				"lastTransitionTime": c.changedAt.UTC().Format(time.RFC3339),
+			}
+			if c.observed != 0 {
+				item["observedGeneration"] = c.observed
+			}
+			items = append(items, item)
+		}
+		statusParents = append(statusParents, map[string]any{
+			"parentRef":      map[string]any{"name": "gateway-default"},
+			"controllerName": "kgateway.dev/kgateway",
+			"conditions":     items,
+		})
+	}
+
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "HTTPRoute",
+		"metadata":   map[string]any{"name": "route"},
+		"spec":       map[string]any{"parentRefs": refs},
+	}}
+	if len(statusParents) > 0 {
+		obj.Object["status"] = map[string]any{"parents": statusParents}
+	}
+	obj.SetGeneration(generation)
+	obj.SetCreationTimestamp(metav1.NewTime(created))
+	return obj
+}
+
+func TestGetGatewayRouteHealth(t *testing.T) {
+	base := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	prevNow := routeHealthNow
+	routeHealthNow = func() time.Time { return base }
+	t.Cleanup(func() { routeHealthNow = prevNow })
+
+	settled := base.Add(-10 * time.Minute) // well past the grace period
+	recent := base.Add(-10 * time.Second)  // within the grace period
+
+	accepted := func(gen int64) routeCondition {
+		return routeCondition{condType: "Accepted", status: "True", reason: "Accepted", observed: gen, changedAt: settled}
+	}
+	resolved := func(gen int64) routeCondition {
+		return routeCondition{condType: "ResolvedRefs", status: "True", reason: "ResolvedRefs", observed: gen, changedAt: settled}
+	}
+
+	tests := []struct {
+		name  string
+		route *unstructured.Unstructured
+		want  openchoreov1alpha1.HealthStatus
+	}{
+		{
+			name:  "accepted with resolved refs for the current generation is Healthy",
+			route: makeRoute(2, settled, 1, []routeCondition{accepted(2), resolved(2)}),
+			want:  openchoreov1alpha1.HealthStatusHealthy,
+		},
+		{
+			name:  "conditions without observedGeneration are taken as current",
+			route: makeRoute(2, settled, 1, []routeCondition{accepted(0), resolved(0)}),
+			want:  openchoreov1alpha1.HealthStatusHealthy,
+		},
+		{
+			name:  "status for an older generation is Progressing",
+			route: makeRoute(3, settled, 1, []routeCondition{accepted(2), resolved(2)}),
+			want:  openchoreov1alpha1.HealthStatusProgressing,
+		},
+		{
+			name: "settled Accepted=False is Degraded",
+			route: makeRoute(1, settled, 1, []routeCondition{
+				{condType: "Accepted", status: "False", reason: "NoMatchingParent", observed: 1, changedAt: settled},
+			}),
+			want: openchoreov1alpha1.HealthStatusDegraded,
+		},
+		{
+			name: "settled ResolvedRefs=False is Degraded even when accepted",
+			route: makeRoute(1, settled, 1, []routeCondition{
+				accepted(1),
+				{condType: "ResolvedRefs", status: "False", reason: "BackendNotFound", observed: 1, changedAt: settled},
+			}),
+			want: openchoreov1alpha1.HealthStatusDegraded,
+		},
+		{
+			name: "recent ResolvedRefs=False is Progressing while the backend Service appears",
+			route: makeRoute(1, recent, 1, []routeCondition{
+				accepted(1),
+				{condType: "ResolvedRefs", status: "False", reason: "BackendNotFound", observed: 1, changedAt: recent},
+			}),
+			want: openchoreov1alpha1.HealthStatusProgressing,
+		},
+		{
+			name: "Accepted=False with reason Pending is never Degraded",
+			route: makeRoute(1, settled, 1, []routeCondition{
+				{condType: "Accepted", status: "False", reason: "Pending", observed: 1, changedAt: settled},
+			}),
+			want: openchoreov1alpha1.HealthStatusProgressing,
+		},
+		{
+			name:  "no parent status on a new route is Progressing",
+			route: makeRoute(1, recent, 1),
+			want:  openchoreov1alpha1.HealthStatusProgressing,
+		},
+		{
+			name:  "no parent status past the grace period is Healthy (gateway writes no route status)",
+			route: makeRoute(1, settled, 1),
+			want:  openchoreov1alpha1.HealthStatusHealthy,
+		},
+		{
+			name:  "only one of two parentRefs accepted is Progressing",
+			route: makeRoute(1, settled, 2, []routeCondition{accepted(1), resolved(1)}),
+			want:  openchoreov1alpha1.HealthStatusProgressing,
+		},
+		{
+			name:  "both parentRefs accepted is Healthy",
+			route: makeRoute(1, settled, 2, []routeCondition{accepted(1), resolved(1)}, []routeCondition{accepted(1), resolved(1)}),
+			want:  openchoreov1alpha1.HealthStatusHealthy,
+		},
+		{
+			name: "one rejected parent among accepted ones is Degraded",
+			route: makeRoute(1, settled, 2,
+				[]routeCondition{accepted(1), resolved(1)},
+				[]routeCondition{{condType: "Accepted", status: "False", reason: "NotAllowedByListeners", observed: 1, changedAt: settled}},
+			),
+			want: openchoreov1alpha1.HealthStatusDegraded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getGatewayRouteHealth(tt.route)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

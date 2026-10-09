@@ -90,6 +90,11 @@ const (
 	// observed healthy status yet.
 	ReasonRoutesProgressing controller.ConditionReason = "RoutesProgressing"
 
+	// ReasonRoutesDegraded indicates one or more rendered resources reported
+	// HealthStatus=Degraded on the data plane, e.g. the gateway rejected a route
+	// or could not resolve one of its backend references.
+	ReasonRoutesDegraded controller.ConditionReason = "RoutesDegraded"
+
 	// ReasonResourceApplyFailed indicates the RenderedRelease reported
 	// ResourcesApplied=False for its current generation.
 	ReasonResourceApplyFailed controller.ConditionReason = "ResourceApplyFailed"
