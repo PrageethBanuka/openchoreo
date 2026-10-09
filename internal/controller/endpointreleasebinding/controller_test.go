@@ -316,6 +316,42 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		Expect(condition(b, string(ConditionReady)).Status).To(Equal(metav1.ConditionTrue))
 	})
 
+	It("passes each backend's own address and base path to the template", func() {
+		rel := newRelease("rel-1", refs[0])
+		rel.Spec.EndpointType.Spec.Resources = []openchoreov1alpha1.ResourceTemplate{{
+			ID: "route",
+			Template: mustRaw(map[string]any{
+				"apiVersion": "gateway.networking.k8s.io/v1",
+				"kind":       "HTTPRoute",
+				"metadata":   map[string]any{"name": "${metadata.name}", "namespace": "${metadata.namespace}"},
+				"spec": map[string]any{
+					"hostnames": []any{"${backends[0].componentURLs.external.host}"},
+					"rules": []any{map[string]any{
+						"matches": []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": "${backends[0].componentURLs.external.path}"}}},
+						"filters": []any{map[string]any{"type": "URLRewrite", "urlRewrite": map[string]any{
+							"path": map[string]any{"type": "ReplacePrefixMatch", "replacePrefixMatch": "${backends[0].basePath}"}}}},
+					}},
+				},
+			}),
+		}}
+		comp := componentBinding("payments-v1")
+		comp.Status.Endpoints[0].ExternalURLs = &openchoreov1alpha1.EndpointGatewayURLs{
+			HTTP: &openchoreov1alpha1.EndpointURL{Scheme: "http", Host: "development-default.openchoreoapis.localhost", Port: 19080, Path: "/payments-v1-http"},
+		}
+		setup(rel, newBinding("rel-1"), comp)
+
+		b := reconcileBinding()
+		var route map[string]any
+		Expect(json.Unmarshal(getRenderedRelease(b).Spec.Resources[0].Object.Raw, &route)).To(Succeed())
+		spec := route["spec"].(map[string]any)
+		Expect(spec["hostnames"]).To(Equal([]any{"development-default.openchoreoapis.localhost"}))
+		rule := spec["rules"].([]any)[0].(map[string]any)
+		Expect(rule["matches"]).To(Equal([]any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": "/payments-v1-http"}}}))
+		filter := rule["filters"].([]any)[0].(map[string]any)
+		Expect(filter["urlRewrite"].(map[string]any)["path"].(map[string]any)["replacePrefixMatch"]).To(Equal("/"),
+			"the base path defaults to / when the workload endpoint sets none")
+	})
+
 	It("reports RoutesDegraded when the data plane marks the route degraded", func() {
 		setup(newRelease("rel-1", refs...), newBinding("rel-1"),
 			componentBinding("payments-v1"), componentBinding("payments-v2"))

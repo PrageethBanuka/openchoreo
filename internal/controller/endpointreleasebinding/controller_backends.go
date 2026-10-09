@@ -166,9 +166,43 @@ func (r *Reconciler) resolveBackend(
 			Namespace:     serviceNamespace,
 			Port:          url.Port,
 			ServiceURL:    endpointurl.String(url),
+			BasePath:      basePathOf(url),
+			ComponentURLs: endpointpipeline.ComponentURLs{
+				External: gatewayAddress(epStatus.ExternalURLs),
+				Internal: gatewayAddress(epStatus.InternalURLs),
+			},
 		},
 		serviceURL: url,
 	}, "", nil
+}
+
+// gatewayAddress returns the address a component serves through one gateway,
+// preferring the https listener, then http, then tls. Nil when the component
+// does not expose the endpoint through that gateway.
+func gatewayAddress(urls *openchoreov1alpha1.EndpointGatewayURLs) *endpointpipeline.Address {
+	if urls == nil {
+		return nil
+	}
+	for _, u := range []*openchoreov1alpha1.EndpointURL{urls.HTTPS, urls.HTTP, urls.TLS} {
+		if u == nil || u.Host == "" {
+			continue
+		}
+		path := u.Path
+		if path == "" {
+			path = "/"
+		}
+		return &endpointpipeline.Address{Scheme: u.Scheme, Host: u.Host, Port: u.Port, Path: path}
+	}
+	return nil
+}
+
+// basePathOf returns the workload endpoint's base path, which the component's
+// service URL carries, defaulting to "/".
+func basePathOf(serviceURL *openchoreov1alpha1.EndpointURL) string {
+	if serviceURL == nil || serviceURL.Path == "" {
+		return "/"
+	}
+	return serviceURL.Path
 }
 
 // splitServiceHost splits "<svc>.<ns>.svc.cluster.local" into its Service name

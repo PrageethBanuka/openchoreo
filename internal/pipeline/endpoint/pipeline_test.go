@@ -240,3 +240,67 @@ func TestRender_RejectsMissingInputs(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Namespace is empty")
 }
+
+// inheritingRouteTemplate serves every backend's existing external address with
+// the weighted split, rewriting each inherited path to the backend's base path.
+// This is the default the shipped EndpointType follows: old URLs keep working
+// and carry the canary.
+func inheritingRouteTemplate(t *testing.T) v1alpha1.ResourceTemplate {
+	return v1alpha1.ResourceTemplate{
+		ID: "route",
+		Template: rawExt(t, map[string]any{
+			"apiVersion": "gateway.networking.k8s.io/v1",
+			"kind":       "HTTPRoute",
+			"metadata": map[string]any{
+				"name":      "${metadata.name}",
+				"namespace": "${metadata.namespace}",
+			},
+			"spec": map[string]any{
+				"parentRefs": []any{map[string]any{"name": "${gateway.ingress.external.name}"}},
+				"hostnames":  `${backends.filter(b, has(b.componentURLs.external)).map(b, b.componentURLs.external.host).distinct()}`,
+				"rules": `${backends.filter(a, has(a.componentURLs.external)).map(a, {
+					"matches": [{"path": {"type": "PathPrefix", "value": a.componentURLs.external.path}}],
+					"filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": a.basePath}}}],
+					"backendRefs": backends.map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
+				})}`,
+			},
+		}),
+	}
+}
+
+func TestRender_InheritsBackendAddresses(t *testing.T) {
+	p := NewPipeline()
+
+	backends := fixtureBackends()
+	for i, path := range []string{"/payments-v1-http", "/payments-v2-http"} {
+		backends[i].BasePath = "/"
+		backends[i].ComponentURLs = ComponentURLs{External: &Address{
+			Scheme: "http", Host: "development-default.openchoreoapis.localhost", Port: 19080, Path: path,
+		}}
+	}
+	// A backend with no external address of its own contributes no address.
+	backends = append(backends, Backend{
+		ComponentName: "payments-v3", Endpoint: "api", Protocol: "HTTP",
+		ServiceName: "payments-v3", Port: 8080, Weight: 0, BasePath: "/",
+	})
+
+	out, err := p.Render(context.Background(), &RenderInput{
+		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{inheritingRouteTemplate(t)}},
+		Backends:         backends,
+		Metadata:         fixtureMetadata(),
+		Environment:      fixtureGateway(),
+	})
+	require.NoError(t, err)
+	require.Len(t, out.Entries, 1)
+
+	spec := out.Entries[0].Object["spec"].(map[string]any)
+	assert.JSONEq(t, `["development-default.openchoreoapis.localhost"]`, jsonOf(t, spec["hostnames"]),
+		"both backends share one hostname; it appears once")
+
+	split := `[{"name":"payments-v1","port":8080,"weight":90},{"name":"payments-v2","port":8080,"weight":10},{"name":"payments-v3","port":8080,"weight":0}]`
+	rewrite := `[{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplacePrefixMatch","replacePrefixMatch":"/"}}}]`
+	assert.JSONEq(t, `[
+		{"matches":[{"path":{"type":"PathPrefix","value":"/payments-v1-http"}}],"filters":`+rewrite+`,"backendRefs":`+split+`},
+		{"matches":[{"path":{"type":"PathPrefix","value":"/payments-v2-http"}}],"filters":`+rewrite+`,"backendRefs":`+split+`}
+	]`, jsonOf(t, spec["rules"]), "every old URL carries the weighted split")
+}

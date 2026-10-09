@@ -18,12 +18,7 @@ import (
 	"github.com/openchoreo/openchoreo/internal/controller"
 )
 
-var (
-	externalOnly = []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal}
-	devURLs      = &openchoreov1alpha1.EndpointGatewayURLs{
-		HTTP: &openchoreov1alpha1.EndpointURL{Scheme: "http", Host: "payments.example.com", Port: 19080, Path: "/pay"},
-	}
-)
+var externalOnly = []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal}
 
 func claimsTestEndpoint(project string, components ...string) *openchoreov1alpha1.Endpoint {
 	ep := &openchoreov1alpha1.Endpoint{
@@ -46,7 +41,7 @@ func claimsTestBinding(env string, serving *openchoreov1alpha1.EndpointServingCl
 			Owner:       openchoreov1alpha1.EndpointReleaseBindingOwner{ProjectName: "shop", EndpointName: "payments-api"},
 			Environment: env,
 		},
-		Status: openchoreov1alpha1.EndpointReleaseBindingStatus{Serving: serving, ExternalURLs: devURLs},
+		Status: openchoreov1alpha1.EndpointReleaseBindingStatus{Serving: serving},
 	}
 }
 
@@ -95,7 +90,7 @@ func TestClaimedEndpoints(t *testing.T) {
 	ctx := context.Background()
 	rb := componentRB("payments-v1", "dev")
 
-	t.Run("serving claim on this component is returned with the Endpoint's URLs", func(t *testing.T) {
+	t.Run("serving claim on this component is returned", func(t *testing.T) {
 		r := claimsTestReconciler(t,
 			claimsTestEndpoint("shop", "payments-v1", "payments-v2"),
 			claimsTestBinding("dev", servingClaim(false, "payments-v1", "payments-v2")),
@@ -105,7 +100,6 @@ func TestClaimedEndpoints(t *testing.T) {
 		require.Len(t, claims["http"], 1)
 		assert.Equal(t, "payments-api", claims["http"][0].endpointName)
 		assert.Equal(t, externalOnly, claims["http"][0].visibilities)
-		assert.Equal(t, devURLs, claims["http"][0].externalURLs)
 	})
 
 	cases := []struct {
@@ -198,22 +192,22 @@ func TestDropClaimedRoutes(t *testing.T) {
 }
 
 func TestApplyClaimsToStatus(t *testing.T) {
-	ownInternal := &openchoreov1alpha1.EndpointGatewayURLs{
-		HTTP: &openchoreov1alpha1.EndpointURL{Scheme: "http", Host: "internal.example.com", Port: 8080},
+	ownExternal := &openchoreov1alpha1.EndpointGatewayURLs{
+		HTTP: &openchoreov1alpha1.EndpointURL{Scheme: "http", Host: "development-default.example.com", Port: 19080, Path: "/payments-v1-http"},
 	}
 	statuses := []openchoreov1alpha1.EndpointURLStatus{
-		{Name: "http", InternalURLs: ownInternal, ServiceURL: &openchoreov1alpha1.EndpointURL{Host: "payments-v1.ns.svc.cluster.local", Port: 8080}},
+		{Name: "http", ExternalURLs: ownExternal, ServiceURL: &openchoreov1alpha1.EndpointURL{Host: "payments-v1.ns.svc.cluster.local", Port: 8080}},
 		{Name: "admin", RoutedBy: []openchoreov1alpha1.EndpointRouteOwner{{EndpointName: "stale"}}},
 	}
 	claims := map[string][]endpointClaim{
-		"http": {{endpointName: "payments-api", visibilities: externalOnly, externalURLs: devURLs}},
+		"http": {{endpointName: "payments-api", visibilities: externalOnly}},
 	}
 
 	got := applyClaimsToStatus(statuses, claims)
 
 	assert.Equal(t, []openchoreov1alpha1.EndpointRouteOwner{{EndpointName: "payments-api", Visibilities: externalOnly}}, got[0].RoutedBy)
-	assert.Equal(t, devURLs, got[0].ExternalURLs, "external URL comes from the Endpoint")
-	assert.Equal(t, ownInternal, got[0].InternalURLs, "unclaimed visibility keeps the component's own URL")
+	assert.Equal(t, ownExternal, got[0].ExternalURLs,
+		"the component keeps reporting its own address; the Endpoint serves that same address")
 	assert.NotNil(t, got[0].ServiceURL, "serviceURL is untouched")
 	assert.Nil(t, got[1].RoutedBy, "a slot no longer claimed loses routedBy")
 }

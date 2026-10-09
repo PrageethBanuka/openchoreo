@@ -103,6 +103,31 @@ type Backend struct {
 	// ServiceURL is the in-cluster URL of the backend, e.g.
 	// http://payments-v1.dp-default-shop-dev.svc.cluster.local:8080.
 	ServiceURL string `json:"serviceURL"`
+
+	// BasePath is the workload endpoint's base path on the backend ("/" when
+	// unset). Templates rewrite inherited path prefixes to it.
+	BasePath string `json:"basePath"`
+
+	// ComponentURLs are the addresses the backend component serves today
+	// through its own ComponentType routes. When the Endpoint owns this
+	// endpoint, those routes are not rendered, so an EndpointType serves these
+	// addresses itself to keep clients of the old URLs working.
+	ComponentURLs ComponentURLs `json:"componentURLs"`
+}
+
+// ComponentURLs are a backend component's own gateway addresses, per
+// visibility. A visibility the component does not expose is omitted.
+type ComponentURLs struct {
+	External *Address `json:"external,omitempty"`
+	Internal *Address `json:"internal,omitempty"`
+}
+
+// Address is one gateway address: the hostname and path prefix clients use.
+type Address struct {
+	Scheme string `json:"scheme"`
+	Host   string `json:"host"`
+	Port   int32  `json:"port"`
+	Path   string `json:"path"`
 }
 
 // RenderOutput carries the rendered manifests in spec order.

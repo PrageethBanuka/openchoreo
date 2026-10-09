@@ -32,8 +32,6 @@ import (
 type endpointClaim struct {
 	endpointName string
 	visibilities []openchoreov1alpha1.EndpointVisibility
-	externalURLs *openchoreov1alpha1.EndpointGatewayURLs
-	internalURLs *openchoreov1alpha1.EndpointGatewayURLs
 }
 
 // claimedEndpoints returns, per workload endpoint name, the Endpoint claims
@@ -91,8 +89,6 @@ func (r *Reconciler) claimedEndpoints(
 			claims[slot.Endpoint] = append(claims[slot.Endpoint], endpointClaim{
 				endpointName: erb.Spec.Owner.EndpointName,
 				visibilities: serving.Visibilities,
-				externalURLs: erb.Status.ExternalURLs,
-				internalURLs: erb.Status.InternalURLs,
 			})
 		}
 	}
@@ -141,11 +137,10 @@ func isClaimedRoute(res map[string]any, claims map[string][]endpointClaim) bool 
 	return false
 }
 
-// applyClaimsToStatus records, on each claimed workload endpoint's status, the
-// Endpoints routing it, and takes the gateway URLs for the claimed visibilities
-// from the Endpoint: the component's own routes for them are not rendered, and
-// clients (connections included) should reach the endpoint through the
-// Endpoint. The in-cluster serviceURL is left untouched.
+// applyClaimsToStatus records, on each workload endpoint's status, the
+// Endpoints that own its routing. Its URLs are left as the component's own
+// addresses: an Endpoint that takes over an endpoint serves those same
+// addresses, so clients and connections keep working unchanged.
 func applyClaimsToStatus(
 	statuses []openchoreov1alpha1.EndpointURLStatus,
 	claims map[string][]endpointClaim,
@@ -158,15 +153,6 @@ func applyClaimsToStatus(
 				EndpointName: c.endpointName,
 				Visibilities: c.visibilities,
 			})
-			for _, v := range c.visibilities {
-				if v == openchoreov1alpha1.EndpointVisibilityExternal {
-					if st.ExternalURLs == nil {
-						st.ExternalURLs = c.externalURLs
-					}
-				} else if st.InternalURLs == nil {
-					st.InternalURLs = c.internalURLs
-				}
-			}
 		}
 	}
 	return statuses
@@ -190,9 +176,7 @@ func endpointClaimChangedPredicate() predicate.Predicate {
 			if !ok {
 				return false
 			}
-			return !apiequality.Semantic.DeepEqual(oldERB.Status.Serving, newERB.Status.Serving) ||
-				!apiequality.Semantic.DeepEqual(oldERB.Status.ExternalURLs, newERB.Status.ExternalURLs) ||
-				!apiequality.Semantic.DeepEqual(oldERB.Status.InternalURLs, newERB.Status.InternalURLs)
+			return !apiequality.Semantic.DeepEqual(oldERB.Status.Serving, newERB.Status.Serving)
 		},
 		DeleteFunc: func(_ event.DeleteEvent) bool {
 			return true

@@ -559,6 +559,14 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, releaseBinding *openc
 		}
 	}
 
+	// The component's own addresses come from what its ComponentType renders,
+	// before any claim is applied. They stay stable while an Endpoint owns the
+	// endpoint, which serves them in the component's place.
+	componentAddressResources, err := r.convertToReleaseResources(dataPlaneResources)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to convert dataplane resources: %w", err)
+	}
+
 	// Gateway routes for workload endpoints claimed by an Endpoint are served by
 	// the Endpoint's route in this environment, so the component's own routes
 	// for those (endpoint, visibility) slots are not rendered.
@@ -694,9 +702,11 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, releaseBinding *openc
 	}
 
 	// Resolve per-endpoint invoke URLs by matching HTTPRoute backendRef ports to workload endpoints.
+	// They are the component's own addresses: an Endpoint that owns an endpoint
+	// serves the same addresses, so they stay valid for clients.
 	releaseBinding.Status.Endpoints = resolveEndpointURLStatuses(
 		ctx,
-		dataPlaneReleaseResources,
+		componentAddressResources,
 		componentRelease.Spec.Workload.Endpoints,
 		environment,
 		dataPlane,
@@ -710,8 +720,7 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, releaseBinding *openc
 		releaseBinding.Status.Endpoints,
 	)
 
-	// Record which Endpoints route each claimed workload endpoint, and expose the
-	// Endpoint's gateway URLs for the visibilities it serves.
+	// Record which Endpoints route each claimed workload endpoint.
 	releaseBinding.Status.Endpoints = applyClaimsToStatus(releaseBinding.Status.Endpoints, endpointClaims)
 
 	// Connection stability guard: check after endpoint URL resolution so that
