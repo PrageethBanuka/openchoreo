@@ -2269,6 +2269,308 @@ func (_c *MockClientWithResponsesInterface_CreateDeploymentPipelineWithResponse_
 	return _c
 }
 
+// CreateEndpointReleaseBindingWithBodyWithResponse provides a mock function with given fields: ctx, namespaceName, contentType, body, reqEditors
+func (_m *MockClientWithResponsesInterface) CreateEndpointReleaseBindingWithBodyWithResponse(ctx context.Context, namespaceName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn) (*gen.CreateEndpointReleaseBindingResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, contentType, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEndpointReleaseBindingWithBodyWithResponse")
+	}
+
+	var r0 *gen.CreateEndpointReleaseBindingResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.CreateEndpointReleaseBindingResp, error)); ok {
+		return rf(ctx, namespaceName, contentType, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) *gen.CreateEndpointReleaseBindingResp); ok {
+		r0 = rf(ctx, namespaceName, contentType, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.CreateEndpointReleaseBindingResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, contentType, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpointReleaseBindingWithBodyWithResponse'
+type MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call struct {
+	*mock.Call
+}
+
+// CreateEndpointReleaseBindingWithBodyWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - contentType string
+//   - body io.Reader
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) CreateEndpointReleaseBindingWithBodyWithResponse(ctx interface{}, namespaceName interface{}, contentType interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call {
+	return &MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call{Call: _e.mock.On("CreateEndpointReleaseBindingWithBodyWithResponse",
+		append([]interface{}{ctx, namespaceName, contentType, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-4)
+		for i, a := range args[4:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(io.Reader), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call) Return(_a0 *gen.CreateEndpointReleaseBindingResp, _a1 error) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call) RunAndReturn(run func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.CreateEndpointReleaseBindingResp, error)) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithBodyWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateEndpointReleaseBindingWithResponse provides a mock function with given fields: ctx, namespaceName, body, reqEditors
+func (_m *MockClientWithResponsesInterface) CreateEndpointReleaseBindingWithResponse(ctx context.Context, namespaceName string, body gen.EndpointReleaseBinding, reqEditors ...gen.RequestEditorFn) (*gen.CreateEndpointReleaseBindingResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEndpointReleaseBindingWithResponse")
+	}
+
+	var r0 *gen.CreateEndpointReleaseBindingResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) (*gen.CreateEndpointReleaseBindingResp, error)); ok {
+		return rf(ctx, namespaceName, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) *gen.CreateEndpointReleaseBindingResp); ok {
+		r0 = rf(ctx, namespaceName, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.CreateEndpointReleaseBindingResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpointReleaseBindingWithResponse'
+type MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call struct {
+	*mock.Call
+}
+
+// CreateEndpointReleaseBindingWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - body gen.EndpointReleaseBinding
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) CreateEndpointReleaseBindingWithResponse(ctx interface{}, namespaceName interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call {
+	return &MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call{Call: _e.mock.On("CreateEndpointReleaseBindingWithResponse",
+		append([]interface{}{ctx, namespaceName, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, body gen.EndpointReleaseBinding, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(gen.EndpointReleaseBinding), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call) Return(_a0 *gen.CreateEndpointReleaseBindingResp, _a1 error) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call) RunAndReturn(run func(context.Context, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) (*gen.CreateEndpointReleaseBindingResp, error)) *MockClientWithResponsesInterface_CreateEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateEndpointWithBodyWithResponse provides a mock function with given fields: ctx, namespaceName, contentType, body, reqEditors
+func (_m *MockClientWithResponsesInterface) CreateEndpointWithBodyWithResponse(ctx context.Context, namespaceName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn) (*gen.CreateEndpointResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, contentType, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEndpointWithBodyWithResponse")
+	}
+
+	var r0 *gen.CreateEndpointResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.CreateEndpointResp, error)); ok {
+		return rf(ctx, namespaceName, contentType, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) *gen.CreateEndpointResp); ok {
+		r0 = rf(ctx, namespaceName, contentType, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.CreateEndpointResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, contentType, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpointWithBodyWithResponse'
+type MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call struct {
+	*mock.Call
+}
+
+// CreateEndpointWithBodyWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - contentType string
+//   - body io.Reader
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) CreateEndpointWithBodyWithResponse(ctx interface{}, namespaceName interface{}, contentType interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call {
+	return &MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call{Call: _e.mock.On("CreateEndpointWithBodyWithResponse",
+		append([]interface{}{ctx, namespaceName, contentType, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-4)
+		for i, a := range args[4:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(io.Reader), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call) Return(_a0 *gen.CreateEndpointResp, _a1 error) *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call) RunAndReturn(run func(context.Context, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.CreateEndpointResp, error)) *MockClientWithResponsesInterface_CreateEndpointWithBodyWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateEndpointWithResponse provides a mock function with given fields: ctx, namespaceName, body, reqEditors
+func (_m *MockClientWithResponsesInterface) CreateEndpointWithResponse(ctx context.Context, namespaceName string, body gen.Endpoint, reqEditors ...gen.RequestEditorFn) (*gen.CreateEndpointResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEndpointWithResponse")
+	}
+
+	var r0 *gen.CreateEndpointResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, gen.Endpoint, ...gen.RequestEditorFn) (*gen.CreateEndpointResp, error)); ok {
+		return rf(ctx, namespaceName, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, gen.Endpoint, ...gen.RequestEditorFn) *gen.CreateEndpointResp); ok {
+		r0 = rf(ctx, namespaceName, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.CreateEndpointResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, gen.Endpoint, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_CreateEndpointWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEndpointWithResponse'
+type MockClientWithResponsesInterface_CreateEndpointWithResponse_Call struct {
+	*mock.Call
+}
+
+// CreateEndpointWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - body gen.Endpoint
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) CreateEndpointWithResponse(ctx interface{}, namespaceName interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call {
+	return &MockClientWithResponsesInterface_CreateEndpointWithResponse_Call{Call: _e.mock.On("CreateEndpointWithResponse",
+		append([]interface{}{ctx, namespaceName, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, body gen.Endpoint, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(gen.Endpoint), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call) Return(_a0 *gen.CreateEndpointResp, _a1 error) *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call) RunAndReturn(run func(context.Context, string, gen.Endpoint, ...gen.RequestEditorFn) (*gen.CreateEndpointResp, error)) *MockClientWithResponsesInterface_CreateEndpointWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateEnvironmentWithBodyWithResponse provides a mock function with given fields: ctx, namespaceName, contentType, body, reqEditors
 func (_m *MockClientWithResponsesInterface) CreateEnvironmentWithBodyWithResponse(ctx context.Context, namespaceName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn) (*gen.CreateEnvironmentResp, error) {
 	_va := make([]interface{}, len(reqEditors))
@@ -6855,6 +7157,156 @@ func (_c *MockClientWithResponsesInterface_DeleteDeploymentPipelineWithResponse_
 	return _c
 }
 
+// DeleteEndpointReleaseBindingWithResponse provides a mock function with given fields: ctx, namespaceName, endpointReleaseBindingName, reqEditors
+func (_m *MockClientWithResponsesInterface) DeleteEndpointReleaseBindingWithResponse(ctx context.Context, namespaceName string, endpointReleaseBindingName string, reqEditors ...gen.RequestEditorFn) (*gen.DeleteEndpointReleaseBindingResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointReleaseBindingName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEndpointReleaseBindingWithResponse")
+	}
+
+	var r0 *gen.DeleteEndpointReleaseBindingResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.DeleteEndpointReleaseBindingResp, error)); ok {
+		return rf(ctx, namespaceName, endpointReleaseBindingName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.DeleteEndpointReleaseBindingResp); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseBindingName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.DeleteEndpointReleaseBindingResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointReleaseBindingName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpointReleaseBindingWithResponse'
+type MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call struct {
+	*mock.Call
+}
+
+// DeleteEndpointReleaseBindingWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseBindingName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) DeleteEndpointReleaseBindingWithResponse(ctx interface{}, namespaceName interface{}, endpointReleaseBindingName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call {
+	return &MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call{Call: _e.mock.On("DeleteEndpointReleaseBindingWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointReleaseBindingName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseBindingName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call) Return(_a0 *gen.DeleteEndpointReleaseBindingResp, _a1 error) *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.DeleteEndpointReleaseBindingResp, error)) *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteEndpointWithResponse provides a mock function with given fields: ctx, namespaceName, endpointName, reqEditors
+func (_m *MockClientWithResponsesInterface) DeleteEndpointWithResponse(ctx context.Context, namespaceName string, endpointName string, reqEditors ...gen.RequestEditorFn) (*gen.DeleteEndpointResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEndpointWithResponse")
+	}
+
+	var r0 *gen.DeleteEndpointResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.DeleteEndpointResp, error)); ok {
+		return rf(ctx, namespaceName, endpointName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.DeleteEndpointResp); ok {
+		r0 = rf(ctx, namespaceName, endpointName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.DeleteEndpointResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpointWithResponse'
+type MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call struct {
+	*mock.Call
+}
+
+// DeleteEndpointWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) DeleteEndpointWithResponse(ctx interface{}, namespaceName interface{}, endpointName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call {
+	return &MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call{Call: _e.mock.On("DeleteEndpointWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call) Return(_a0 *gen.DeleteEndpointResp, _a1 error) *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.DeleteEndpointResp, error)) *MockClientWithResponsesInterface_DeleteEndpointWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteEnvironmentWithResponse provides a mock function with given fields: ctx, namespaceName, envName, reqEditors
 func (_m *MockClientWithResponsesInterface) DeleteEnvironmentWithResponse(ctx context.Context, namespaceName string, envName string, reqEditors ...gen.RequestEditorFn) (*gen.DeleteEnvironmentResp, error) {
 	_va := make([]interface{}, len(reqEditors))
@@ -9103,6 +9555,80 @@ func (_c *MockClientWithResponsesInterface_GetClusterDataPlaneWithResponse_Call)
 	return _c
 }
 
+// GetClusterEndpointTypeWithResponse provides a mock function with given fields: ctx, cetName, reqEditors
+func (_m *MockClientWithResponsesInterface) GetClusterEndpointTypeWithResponse(ctx context.Context, cetName string, reqEditors ...gen.RequestEditorFn) (*gen.GetClusterEndpointTypeResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, cetName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterEndpointTypeWithResponse")
+	}
+
+	var r0 *gen.GetClusterEndpointTypeResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, ...gen.RequestEditorFn) (*gen.GetClusterEndpointTypeResp, error)); ok {
+		return rf(ctx, cetName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, ...gen.RequestEditorFn) *gen.GetClusterEndpointTypeResp); ok {
+		r0 = rf(ctx, cetName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.GetClusterEndpointTypeResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, cetName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterEndpointTypeWithResponse'
+type MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call struct {
+	*mock.Call
+}
+
+// GetClusterEndpointTypeWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - cetName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) GetClusterEndpointTypeWithResponse(ctx interface{}, cetName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call {
+	return &MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call{Call: _e.mock.On("GetClusterEndpointTypeWithResponse",
+		append([]interface{}{ctx, cetName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call) Run(run func(ctx context.Context, cetName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call) Return(_a0 *gen.GetClusterEndpointTypeResp, _a1 error) *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call) RunAndReturn(run func(context.Context, string, ...gen.RequestEditorFn) (*gen.GetClusterEndpointTypeResp, error)) *MockClientWithResponsesInterface_GetClusterEndpointTypeWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetClusterObservabilityPlaneWithResponse provides a mock function with given fields: ctx, clusterObservabilityPlaneName, reqEditors
 func (_m *MockClientWithResponsesInterface) GetClusterObservabilityPlaneWithResponse(ctx context.Context, clusterObservabilityPlaneName string, reqEditors ...gen.RequestEditorFn) (*gen.GetClusterObservabilityPlaneResp, error) {
 	_va := make([]interface{}, len(reqEditors))
@@ -10512,6 +11038,306 @@ func (_c *MockClientWithResponsesInterface_GetDeploymentPipelineWithResponse_Cal
 }
 
 func (_c *MockClientWithResponsesInterface_GetDeploymentPipelineWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetDeploymentPipelineResp, error)) *MockClientWithResponsesInterface_GetDeploymentPipelineWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpointReleaseBindingWithResponse provides a mock function with given fields: ctx, namespaceName, endpointReleaseBindingName, reqEditors
+func (_m *MockClientWithResponsesInterface) GetEndpointReleaseBindingWithResponse(ctx context.Context, namespaceName string, endpointReleaseBindingName string, reqEditors ...gen.RequestEditorFn) (*gen.GetEndpointReleaseBindingResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointReleaseBindingName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpointReleaseBindingWithResponse")
+	}
+
+	var r0 *gen.GetEndpointReleaseBindingResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointReleaseBindingResp, error)); ok {
+		return rf(ctx, namespaceName, endpointReleaseBindingName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.GetEndpointReleaseBindingResp); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseBindingName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.GetEndpointReleaseBindingResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointReleaseBindingName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpointReleaseBindingWithResponse'
+type MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call struct {
+	*mock.Call
+}
+
+// GetEndpointReleaseBindingWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseBindingName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) GetEndpointReleaseBindingWithResponse(ctx interface{}, namespaceName interface{}, endpointReleaseBindingName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call {
+	return &MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call{Call: _e.mock.On("GetEndpointReleaseBindingWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointReleaseBindingName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseBindingName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call) Return(_a0 *gen.GetEndpointReleaseBindingResp, _a1 error) *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointReleaseBindingResp, error)) *MockClientWithResponsesInterface_GetEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpointReleaseWithResponse provides a mock function with given fields: ctx, namespaceName, endpointReleaseName, reqEditors
+func (_m *MockClientWithResponsesInterface) GetEndpointReleaseWithResponse(ctx context.Context, namespaceName string, endpointReleaseName string, reqEditors ...gen.RequestEditorFn) (*gen.GetEndpointReleaseResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointReleaseName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpointReleaseWithResponse")
+	}
+
+	var r0 *gen.GetEndpointReleaseResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointReleaseResp, error)); ok {
+		return rf(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.GetEndpointReleaseResp); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.GetEndpointReleaseResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpointReleaseWithResponse'
+type MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call struct {
+	*mock.Call
+}
+
+// GetEndpointReleaseWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) GetEndpointReleaseWithResponse(ctx interface{}, namespaceName interface{}, endpointReleaseName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call {
+	return &MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call{Call: _e.mock.On("GetEndpointReleaseWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointReleaseName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call) Return(_a0 *gen.GetEndpointReleaseResp, _a1 error) *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointReleaseResp, error)) *MockClientWithResponsesInterface_GetEndpointReleaseWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpointTypeWithResponse provides a mock function with given fields: ctx, namespaceName, etName, reqEditors
+func (_m *MockClientWithResponsesInterface) GetEndpointTypeWithResponse(ctx context.Context, namespaceName string, etName string, reqEditors ...gen.RequestEditorFn) (*gen.GetEndpointTypeResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, etName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpointTypeWithResponse")
+	}
+
+	var r0 *gen.GetEndpointTypeResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointTypeResp, error)); ok {
+		return rf(ctx, namespaceName, etName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.GetEndpointTypeResp); ok {
+		r0 = rf(ctx, namespaceName, etName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.GetEndpointTypeResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, etName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpointTypeWithResponse'
+type MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call struct {
+	*mock.Call
+}
+
+// GetEndpointTypeWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - etName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) GetEndpointTypeWithResponse(ctx interface{}, namespaceName interface{}, etName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call {
+	return &MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call{Call: _e.mock.On("GetEndpointTypeWithResponse",
+		append([]interface{}{ctx, namespaceName, etName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, etName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call) Return(_a0 *gen.GetEndpointTypeResp, _a1 error) *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointTypeResp, error)) *MockClientWithResponsesInterface_GetEndpointTypeWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetEndpointWithResponse provides a mock function with given fields: ctx, namespaceName, endpointName, reqEditors
+func (_m *MockClientWithResponsesInterface) GetEndpointWithResponse(ctx context.Context, namespaceName string, endpointName string, reqEditors ...gen.RequestEditorFn) (*gen.GetEndpointResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEndpointWithResponse")
+	}
+
+	var r0 *gen.GetEndpointResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointResp, error)); ok {
+		return rf(ctx, namespaceName, endpointName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.GetEndpointResp); ok {
+		r0 = rf(ctx, namespaceName, endpointName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.GetEndpointResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_GetEndpointWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEndpointWithResponse'
+type MockClientWithResponsesInterface_GetEndpointWithResponse_Call struct {
+	*mock.Call
+}
+
+// GetEndpointWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) GetEndpointWithResponse(ctx interface{}, namespaceName interface{}, endpointName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_GetEndpointWithResponse_Call {
+	return &MockClientWithResponsesInterface_GetEndpointWithResponse_Call{Call: _e.mock.On("GetEndpointWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_GetEndpointWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointWithResponse_Call) Return(_a0 *gen.GetEndpointResp, _a1 error) *MockClientWithResponsesInterface_GetEndpointWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetEndpointWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.GetEndpointResp, error)) *MockClientWithResponsesInterface_GetEndpointWithResponse_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -13803,6 +14629,80 @@ func (_c *MockClientWithResponsesInterface_ListClusterDataPlanesWithResponse_Cal
 	return _c
 }
 
+// ListClusterEndpointTypesWithResponse provides a mock function with given fields: ctx, params, reqEditors
+func (_m *MockClientWithResponsesInterface) ListClusterEndpointTypesWithResponse(ctx context.Context, params *gen.ListClusterEndpointTypesParams, reqEditors ...gen.RequestEditorFn) (*gen.ListClusterEndpointTypesResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, params)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListClusterEndpointTypesWithResponse")
+	}
+
+	var r0 *gen.ListClusterEndpointTypesResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *gen.ListClusterEndpointTypesParams, ...gen.RequestEditorFn) (*gen.ListClusterEndpointTypesResp, error)); ok {
+		return rf(ctx, params, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *gen.ListClusterEndpointTypesParams, ...gen.RequestEditorFn) *gen.ListClusterEndpointTypesResp); ok {
+		r0 = rf(ctx, params, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.ListClusterEndpointTypesResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *gen.ListClusterEndpointTypesParams, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, params, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListClusterEndpointTypesWithResponse'
+type MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call struct {
+	*mock.Call
+}
+
+// ListClusterEndpointTypesWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - params *gen.ListClusterEndpointTypesParams
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) ListClusterEndpointTypesWithResponse(ctx interface{}, params interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call {
+	return &MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call{Call: _e.mock.On("ListClusterEndpointTypesWithResponse",
+		append([]interface{}{ctx, params}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call) Run(run func(ctx context.Context, params *gen.ListClusterEndpointTypesParams, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*gen.ListClusterEndpointTypesParams), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call) Return(_a0 *gen.ListClusterEndpointTypesResp, _a1 error) *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call) RunAndReturn(run func(context.Context, *gen.ListClusterEndpointTypesParams, ...gen.RequestEditorFn) (*gen.ListClusterEndpointTypesResp, error)) *MockClientWithResponsesInterface_ListClusterEndpointTypesWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListClusterObservabilityPlanesWithResponse provides a mock function with given fields: ctx, params, reqEditors
 func (_m *MockClientWithResponsesInterface) ListClusterObservabilityPlanesWithResponse(ctx context.Context, params *gen.ListClusterObservabilityPlanesParams, reqEditors ...gen.RequestEditorFn) (*gen.ListClusterObservabilityPlanesResp, error) {
 	_va := make([]interface{}, len(reqEditors))
@@ -14766,6 +15666,306 @@ func (_c *MockClientWithResponsesInterface_ListDeploymentPipelinesWithResponse_C
 }
 
 func (_c *MockClientWithResponsesInterface_ListDeploymentPipelinesWithResponse_Call) RunAndReturn(run func(context.Context, string, *gen.ListDeploymentPipelinesParams, ...gen.RequestEditorFn) (*gen.ListDeploymentPipelinesResp, error)) *MockClientWithResponsesInterface_ListDeploymentPipelinesWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListEndpointReleaseBindingsWithResponse provides a mock function with given fields: ctx, namespaceName, params, reqEditors
+func (_m *MockClientWithResponsesInterface) ListEndpointReleaseBindingsWithResponse(ctx context.Context, namespaceName string, params *gen.ListEndpointReleaseBindingsParams, reqEditors ...gen.RequestEditorFn) (*gen.ListEndpointReleaseBindingsResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, params)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListEndpointReleaseBindingsWithResponse")
+	}
+
+	var r0 *gen.ListEndpointReleaseBindingsResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointReleaseBindingsParams, ...gen.RequestEditorFn) (*gen.ListEndpointReleaseBindingsResp, error)); ok {
+		return rf(ctx, namespaceName, params, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointReleaseBindingsParams, ...gen.RequestEditorFn) *gen.ListEndpointReleaseBindingsResp); ok {
+		r0 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.ListEndpointReleaseBindingsResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, *gen.ListEndpointReleaseBindingsParams, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListEndpointReleaseBindingsWithResponse'
+type MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call struct {
+	*mock.Call
+}
+
+// ListEndpointReleaseBindingsWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - params *gen.ListEndpointReleaseBindingsParams
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) ListEndpointReleaseBindingsWithResponse(ctx interface{}, namespaceName interface{}, params interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call {
+	return &MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call{Call: _e.mock.On("ListEndpointReleaseBindingsWithResponse",
+		append([]interface{}{ctx, namespaceName, params}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, params *gen.ListEndpointReleaseBindingsParams, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(*gen.ListEndpointReleaseBindingsParams), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call) Return(_a0 *gen.ListEndpointReleaseBindingsResp, _a1 error) *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call) RunAndReturn(run func(context.Context, string, *gen.ListEndpointReleaseBindingsParams, ...gen.RequestEditorFn) (*gen.ListEndpointReleaseBindingsResp, error)) *MockClientWithResponsesInterface_ListEndpointReleaseBindingsWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListEndpointReleasesWithResponse provides a mock function with given fields: ctx, namespaceName, params, reqEditors
+func (_m *MockClientWithResponsesInterface) ListEndpointReleasesWithResponse(ctx context.Context, namespaceName string, params *gen.ListEndpointReleasesParams, reqEditors ...gen.RequestEditorFn) (*gen.ListEndpointReleasesResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, params)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListEndpointReleasesWithResponse")
+	}
+
+	var r0 *gen.ListEndpointReleasesResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointReleasesParams, ...gen.RequestEditorFn) (*gen.ListEndpointReleasesResp, error)); ok {
+		return rf(ctx, namespaceName, params, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointReleasesParams, ...gen.RequestEditorFn) *gen.ListEndpointReleasesResp); ok {
+		r0 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.ListEndpointReleasesResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, *gen.ListEndpointReleasesParams, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListEndpointReleasesWithResponse'
+type MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call struct {
+	*mock.Call
+}
+
+// ListEndpointReleasesWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - params *gen.ListEndpointReleasesParams
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) ListEndpointReleasesWithResponse(ctx interface{}, namespaceName interface{}, params interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call {
+	return &MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call{Call: _e.mock.On("ListEndpointReleasesWithResponse",
+		append([]interface{}{ctx, namespaceName, params}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, params *gen.ListEndpointReleasesParams, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(*gen.ListEndpointReleasesParams), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call) Return(_a0 *gen.ListEndpointReleasesResp, _a1 error) *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call) RunAndReturn(run func(context.Context, string, *gen.ListEndpointReleasesParams, ...gen.RequestEditorFn) (*gen.ListEndpointReleasesResp, error)) *MockClientWithResponsesInterface_ListEndpointReleasesWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListEndpointTypesWithResponse provides a mock function with given fields: ctx, namespaceName, params, reqEditors
+func (_m *MockClientWithResponsesInterface) ListEndpointTypesWithResponse(ctx context.Context, namespaceName string, params *gen.ListEndpointTypesParams, reqEditors ...gen.RequestEditorFn) (*gen.ListEndpointTypesResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, params)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListEndpointTypesWithResponse")
+	}
+
+	var r0 *gen.ListEndpointTypesResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointTypesParams, ...gen.RequestEditorFn) (*gen.ListEndpointTypesResp, error)); ok {
+		return rf(ctx, namespaceName, params, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointTypesParams, ...gen.RequestEditorFn) *gen.ListEndpointTypesResp); ok {
+		r0 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.ListEndpointTypesResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, *gen.ListEndpointTypesParams, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListEndpointTypesWithResponse'
+type MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call struct {
+	*mock.Call
+}
+
+// ListEndpointTypesWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - params *gen.ListEndpointTypesParams
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) ListEndpointTypesWithResponse(ctx interface{}, namespaceName interface{}, params interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call {
+	return &MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call{Call: _e.mock.On("ListEndpointTypesWithResponse",
+		append([]interface{}{ctx, namespaceName, params}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, params *gen.ListEndpointTypesParams, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(*gen.ListEndpointTypesParams), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call) Return(_a0 *gen.ListEndpointTypesResp, _a1 error) *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call) RunAndReturn(run func(context.Context, string, *gen.ListEndpointTypesParams, ...gen.RequestEditorFn) (*gen.ListEndpointTypesResp, error)) *MockClientWithResponsesInterface_ListEndpointTypesWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListEndpointsWithResponse provides a mock function with given fields: ctx, namespaceName, params, reqEditors
+func (_m *MockClientWithResponsesInterface) ListEndpointsWithResponse(ctx context.Context, namespaceName string, params *gen.ListEndpointsParams, reqEditors ...gen.RequestEditorFn) (*gen.ListEndpointsResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, params)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListEndpointsWithResponse")
+	}
+
+	var r0 *gen.ListEndpointsResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointsParams, ...gen.RequestEditorFn) (*gen.ListEndpointsResp, error)); ok {
+		return rf(ctx, namespaceName, params, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, *gen.ListEndpointsParams, ...gen.RequestEditorFn) *gen.ListEndpointsResp); ok {
+		r0 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.ListEndpointsResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, *gen.ListEndpointsParams, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, params, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_ListEndpointsWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListEndpointsWithResponse'
+type MockClientWithResponsesInterface_ListEndpointsWithResponse_Call struct {
+	*mock.Call
+}
+
+// ListEndpointsWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - params *gen.ListEndpointsParams
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) ListEndpointsWithResponse(ctx interface{}, namespaceName interface{}, params interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call {
+	return &MockClientWithResponsesInterface_ListEndpointsWithResponse_Call{Call: _e.mock.On("ListEndpointsWithResponse",
+		append([]interface{}{ctx, namespaceName, params}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, params *gen.ListEndpointsParams, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(*gen.ListEndpointsParams), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call) Return(_a0 *gen.ListEndpointsResp, _a1 error) *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call) RunAndReturn(run func(context.Context, string, *gen.ListEndpointsParams, ...gen.RequestEditorFn) (*gen.ListEndpointsResp, error)) *MockClientWithResponsesInterface_ListEndpointsWithResponse_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -18837,6 +20037,312 @@ func (_c *MockClientWithResponsesInterface_UpdateDeploymentPipelineWithResponse_
 }
 
 func (_c *MockClientWithResponsesInterface_UpdateDeploymentPipelineWithResponse_Call) RunAndReturn(run func(context.Context, string, string, gen.DeploymentPipeline, ...gen.RequestEditorFn) (*gen.UpdateDeploymentPipelineResp, error)) *MockClientWithResponsesInterface_UpdateDeploymentPipelineWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateEndpointReleaseBindingWithBodyWithResponse provides a mock function with given fields: ctx, namespaceName, endpointReleaseBindingName, contentType, body, reqEditors
+func (_m *MockClientWithResponsesInterface) UpdateEndpointReleaseBindingWithBodyWithResponse(ctx context.Context, namespaceName string, endpointReleaseBindingName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn) (*gen.UpdateEndpointReleaseBindingResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointReleaseBindingName, contentType, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEndpointReleaseBindingWithBodyWithResponse")
+	}
+
+	var r0 *gen.UpdateEndpointReleaseBindingResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.UpdateEndpointReleaseBindingResp, error)); ok {
+		return rf(ctx, namespaceName, endpointReleaseBindingName, contentType, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) *gen.UpdateEndpointReleaseBindingResp); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseBindingName, contentType, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.UpdateEndpointReleaseBindingResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointReleaseBindingName, contentType, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEndpointReleaseBindingWithBodyWithResponse'
+type MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call struct {
+	*mock.Call
+}
+
+// UpdateEndpointReleaseBindingWithBodyWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseBindingName string
+//   - contentType string
+//   - body io.Reader
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) UpdateEndpointReleaseBindingWithBodyWithResponse(ctx interface{}, namespaceName interface{}, endpointReleaseBindingName interface{}, contentType interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call {
+	return &MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call{Call: _e.mock.On("UpdateEndpointReleaseBindingWithBodyWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointReleaseBindingName, contentType, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseBindingName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-5)
+		for i, a := range args[5:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(io.Reader), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call) Return(_a0 *gen.UpdateEndpointReleaseBindingResp, _a1 error) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call) RunAndReturn(run func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.UpdateEndpointReleaseBindingResp, error)) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithBodyWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateEndpointReleaseBindingWithResponse provides a mock function with given fields: ctx, namespaceName, endpointReleaseBindingName, body, reqEditors
+func (_m *MockClientWithResponsesInterface) UpdateEndpointReleaseBindingWithResponse(ctx context.Context, namespaceName string, endpointReleaseBindingName string, body gen.EndpointReleaseBinding, reqEditors ...gen.RequestEditorFn) (*gen.UpdateEndpointReleaseBindingResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointReleaseBindingName, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEndpointReleaseBindingWithResponse")
+	}
+
+	var r0 *gen.UpdateEndpointReleaseBindingResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) (*gen.UpdateEndpointReleaseBindingResp, error)); ok {
+		return rf(ctx, namespaceName, endpointReleaseBindingName, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) *gen.UpdateEndpointReleaseBindingResp); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseBindingName, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.UpdateEndpointReleaseBindingResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointReleaseBindingName, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEndpointReleaseBindingWithResponse'
+type MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call struct {
+	*mock.Call
+}
+
+// UpdateEndpointReleaseBindingWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseBindingName string
+//   - body gen.EndpointReleaseBinding
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) UpdateEndpointReleaseBindingWithResponse(ctx interface{}, namespaceName interface{}, endpointReleaseBindingName interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call {
+	return &MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call{Call: _e.mock.On("UpdateEndpointReleaseBindingWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointReleaseBindingName, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseBindingName string, body gen.EndpointReleaseBinding, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-4)
+		for i, a := range args[4:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(gen.EndpointReleaseBinding), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call) Return(_a0 *gen.UpdateEndpointReleaseBindingResp, _a1 error) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call) RunAndReturn(run func(context.Context, string, string, gen.EndpointReleaseBinding, ...gen.RequestEditorFn) (*gen.UpdateEndpointReleaseBindingResp, error)) *MockClientWithResponsesInterface_UpdateEndpointReleaseBindingWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateEndpointWithBodyWithResponse provides a mock function with given fields: ctx, namespaceName, endpointName, contentType, body, reqEditors
+func (_m *MockClientWithResponsesInterface) UpdateEndpointWithBodyWithResponse(ctx context.Context, namespaceName string, endpointName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn) (*gen.UpdateEndpointResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointName, contentType, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEndpointWithBodyWithResponse")
+	}
+
+	var r0 *gen.UpdateEndpointResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.UpdateEndpointResp, error)); ok {
+		return rf(ctx, namespaceName, endpointName, contentType, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) *gen.UpdateEndpointResp); ok {
+		r0 = rf(ctx, namespaceName, endpointName, contentType, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.UpdateEndpointResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointName, contentType, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEndpointWithBodyWithResponse'
+type MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call struct {
+	*mock.Call
+}
+
+// UpdateEndpointWithBodyWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointName string
+//   - contentType string
+//   - body io.Reader
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) UpdateEndpointWithBodyWithResponse(ctx interface{}, namespaceName interface{}, endpointName interface{}, contentType interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call {
+	return &MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call{Call: _e.mock.On("UpdateEndpointWithBodyWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointName, contentType, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointName string, contentType string, body io.Reader, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-5)
+		for i, a := range args[5:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(io.Reader), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call) Return(_a0 *gen.UpdateEndpointResp, _a1 error) *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call) RunAndReturn(run func(context.Context, string, string, string, io.Reader, ...gen.RequestEditorFn) (*gen.UpdateEndpointResp, error)) *MockClientWithResponsesInterface_UpdateEndpointWithBodyWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateEndpointWithResponse provides a mock function with given fields: ctx, namespaceName, endpointName, body, reqEditors
+func (_m *MockClientWithResponsesInterface) UpdateEndpointWithResponse(ctx context.Context, namespaceName string, endpointName string, body gen.Endpoint, reqEditors ...gen.RequestEditorFn) (*gen.UpdateEndpointResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointName, body)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEndpointWithResponse")
+	}
+
+	var r0 *gen.UpdateEndpointResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, gen.Endpoint, ...gen.RequestEditorFn) (*gen.UpdateEndpointResp, error)); ok {
+		return rf(ctx, namespaceName, endpointName, body, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, gen.Endpoint, ...gen.RequestEditorFn) *gen.UpdateEndpointResp); ok {
+		r0 = rf(ctx, namespaceName, endpointName, body, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.UpdateEndpointResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, gen.Endpoint, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointName, body, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEndpointWithResponse'
+type MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call struct {
+	*mock.Call
+}
+
+// UpdateEndpointWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointName string
+//   - body gen.Endpoint
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) UpdateEndpointWithResponse(ctx interface{}, namespaceName interface{}, endpointName interface{}, body interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call {
+	return &MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call{Call: _e.mock.On("UpdateEndpointWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointName, body}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointName string, body gen.Endpoint, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-4)
+		for i, a := range args[4:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(gen.Endpoint), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call) Return(_a0 *gen.UpdateEndpointResp, _a1 error) *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call) RunAndReturn(run func(context.Context, string, string, gen.Endpoint, ...gen.RequestEditorFn) (*gen.UpdateEndpointResp, error)) *MockClientWithResponsesInterface_UpdateEndpointWithResponse_Call {
 	_c.Call.Return(run)
 	return _c
 }

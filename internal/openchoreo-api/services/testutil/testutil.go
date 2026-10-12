@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -58,6 +59,8 @@ func statusSubresourceObjects() []client.Object {
 		&openchoreov1alpha1.ComponentType{},
 		&openchoreov1alpha1.DataPlane{},
 		&openchoreov1alpha1.DeploymentPipeline{},
+		&openchoreov1alpha1.Endpoint{},
+		&openchoreov1alpha1.EndpointReleaseBinding{},
 		&openchoreov1alpha1.Environment{},
 		&openchoreov1alpha1.ObservabilityAlertsNotificationChannel{},
 		&openchoreov1alpha1.ObservabilityPlane{},
@@ -396,6 +399,93 @@ func NewResourceReleaseBinding(namespace, projectName, resourceName, environment
 	}
 }
 
+// NewEndpoint creates an Endpoint test fixture routing 90/10 between two
+// components of the project.
+func NewEndpoint(namespace, projectName, name string) *openchoreov1alpha1.Endpoint {
+	return &openchoreov1alpha1.Endpoint{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: openchoreov1alpha1.EndpointSpec{
+			Owner: openchoreov1alpha1.EndpointOwner{
+				ProjectName: projectName,
+			},
+			Type: openchoreov1alpha1.EndpointTypeRef{
+				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
+				Name: "http-weighted",
+			},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
+				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](90)},
+				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](10)},
+			},
+		},
+	}
+}
+
+// NewEndpointRelease creates an EndpointRelease test fixture.
+func NewEndpointRelease(namespace, projectName, endpointName, name string) *openchoreov1alpha1.EndpointRelease {
+	return &openchoreov1alpha1.EndpointRelease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: openchoreov1alpha1.EndpointReleaseSpec{
+			Owner: openchoreov1alpha1.EndpointReleaseOwner{
+				ProjectName:  projectName,
+				EndpointName: endpointName,
+			},
+			EndpointType: openchoreov1alpha1.EndpointReleaseEndpointType{
+				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
+				Name: "http-weighted",
+				Spec: defaultEndpointTypeSpec(),
+			},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
+				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](100)},
+			},
+		},
+	}
+}
+
+// NewEndpointReleaseBinding creates an EndpointReleaseBinding test fixture.
+func NewEndpointReleaseBinding(namespace, projectName, endpointName, environment, name string) *openchoreov1alpha1.EndpointReleaseBinding {
+	return &openchoreov1alpha1.EndpointReleaseBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: openchoreov1alpha1.EndpointReleaseBindingSpec{
+			Owner: openchoreov1alpha1.EndpointReleaseBindingOwner{
+				ProjectName:  projectName,
+				EndpointName: endpointName,
+			},
+			Environment: environment,
+		},
+	}
+}
+
+// NewClusterEndpointType creates a ClusterEndpointType test fixture.
+func NewClusterEndpointType(name string) *openchoreov1alpha1.ClusterEndpointType {
+	spec := defaultEndpointTypeSpec()
+	return &openchoreov1alpha1.ClusterEndpointType{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: openchoreov1alpha1.ClusterEndpointTypeSpec{
+			Resources: spec.Resources,
+		},
+	}
+}
+
+// NewEndpointType creates an EndpointType test fixture.
+func NewEndpointType(namespace, name string) *openchoreov1alpha1.EndpointType {
+	return &openchoreov1alpha1.EndpointType{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: defaultEndpointTypeSpec(),
+	}
+}
+
 // NewDeploymentPipeline creates a DeploymentPipeline test fixture.
 func NewDeploymentPipeline(namespace, name string) *openchoreov1alpha1.DeploymentPipeline {
 	return &openchoreov1alpha1.DeploymentPipeline{
@@ -636,6 +726,12 @@ func defaultResourceTypeSpec() openchoreov1alpha1.ResourceTypeSpec {
 				Template: testRunTemplate(),
 			},
 		},
+	}
+}
+
+func defaultEndpointTypeSpec() openchoreov1alpha1.EndpointTypeSpec {
+	return openchoreov1alpha1.EndpointTypeSpec{
+		Resources: []openchoreov1alpha1.ResourceTemplate{testResourceTemplate("route")},
 	}
 }
 

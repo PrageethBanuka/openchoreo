@@ -93,6 +93,27 @@ const (
 	ActionUpdateResourceReleaseBinding = "resourcereleasebinding:update"
 	ActionDeleteResourceReleaseBinding = "resourcereleasebinding:delete"
 
+	// Endpoint actions
+	ActionCreateEndpoint = "endpoint:create"
+	ActionViewEndpoint   = "endpoint:view"
+	ActionUpdateEndpoint = "endpoint:update"
+	ActionDeleteEndpoint = "endpoint:delete"
+
+	// EndpointRelease actions
+	ActionViewEndpointRelease = "endpointrelease:view"
+
+	// EndpointReleaseBinding actions
+	ActionCreateEndpointReleaseBinding = "endpointreleasebinding:create"
+	ActionViewEndpointReleaseBinding   = "endpointreleasebinding:view"
+	ActionUpdateEndpointReleaseBinding = "endpointreleasebinding:update"
+	ActionDeleteEndpointReleaseBinding = "endpointreleasebinding:delete"
+
+	// EndpointType actions
+	ActionViewEndpointType = "endpointtype:view"
+
+	// ClusterEndpointType actions
+	ActionViewClusterEndpointType = "clusterendpointtype:view"
+
 	// ComponentType actions
 	ActionCreateComponentType = "componenttype:create"
 	ActionViewComponentType   = "componenttype:view"
@@ -383,6 +404,28 @@ var systemActions = []Action{
 	{Name: ActionCreateResourceReleaseBinding, LowestScope: ScopeResource, IsInternal: false},
 	{Name: ActionUpdateResourceReleaseBinding, LowestScope: ScopeResource, IsInternal: false},
 	{Name: ActionDeleteResourceReleaseBinding, LowestScope: ScopeResource, IsInternal: false},
+
+	// Endpoint. An Endpoint routes across several components of a project, so
+	// its actions are evaluated at the project level.
+	{Name: ActionViewEndpoint, LowestScope: ScopeProject, IsInternal: false},
+	{Name: ActionCreateEndpoint, LowestScope: ScopeProject, IsInternal: false},
+	{Name: ActionUpdateEndpoint, LowestScope: ScopeProject, IsInternal: false},
+	{Name: ActionDeleteEndpoint, LowestScope: ScopeProject, IsInternal: false},
+
+	// EndpointRelease
+	{Name: ActionViewEndpointRelease, LowestScope: ScopeProject, IsInternal: false},
+
+	// EndpointReleaseBinding
+	{Name: ActionViewEndpointReleaseBinding, LowestScope: ScopeProject, IsInternal: false},
+	{Name: ActionCreateEndpointReleaseBinding, LowestScope: ScopeProject, IsInternal: false},
+	{Name: ActionUpdateEndpointReleaseBinding, LowestScope: ScopeProject, IsInternal: false},
+	{Name: ActionDeleteEndpointReleaseBinding, LowestScope: ScopeProject, IsInternal: false},
+
+	// EndpointType
+	{Name: ActionViewEndpointType, LowestScope: ScopeNamespace, IsInternal: false},
+
+	// ClusterEndpointType
+	{Name: ActionViewClusterEndpointType, LowestScope: ScopeCluster, IsInternal: false},
 
 	// ComponentType
 	{Name: ActionViewComponentType, LowestScope: ScopeNamespace, IsInternal: false},

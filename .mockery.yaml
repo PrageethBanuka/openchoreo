@@ -90,6 +90,21 @@ packages:
   github.com/openchoreo/openchoreo/internal/openchoreo-api/services/releasebinding:
     interfaces:
       Service:
+  github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpoint:
+    interfaces:
+      Service:
+  github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointrelease:
+    interfaces:
+      Service:
+  github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointreleasebinding:
+    interfaces:
+      Service:
+  github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointtype:
+    interfaces:
+      Service:
+  github.com/openchoreo/openchoreo/internal/openchoreo-api/services/clusterendpointtype:
+    interfaces:
+      Service:
   github.com/openchoreo/openchoreo/internal/openchoreo-api/services/resource:
     interfaces:
       Service:

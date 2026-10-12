@@ -282,8 +282,9 @@ type EndpointURLStatus struct {
 
 	// RoutedBy lists the Endpoints whose routes serve this workload endpoint's
 	// gateway traffic in this environment. For the visibilities they claim, the
-	// component's own gateway routes are not rendered, and InternalURLs /
-	// ExternalURLs are the Endpoint's.
+	// component's own gateway routes are not rendered. InternalURLs /
+	// ExternalURLs still report the component's own addresses, which an
+	// EndpointType can keep serving through the Endpoint's routes.
 	// +optional
 	// +listType=map
 	// +listMapKey=endpointName

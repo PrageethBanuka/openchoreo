@@ -79,6 +79,14 @@ func generatedOperationDefs() []audit.OperationDef {
 			Category: audit.CategoryManagement,
 		},
 		{
+			ID: "CreateEndpoint", Action: "create_endpoint", ResourceType: "endpoint",
+			Category: audit.CategoryManagement,
+		},
+		{
+			ID: "CreateEndpointReleaseBinding", Action: "create_endpoint_release_binding", ResourceType: "endpointreleasebinding",
+			Category: audit.CategoryManagement,
+		},
+		{
 			ID: "CreateEnvironment", Action: "create_environment", ResourceType: "environment",
 			Category: audit.CategoryManagement,
 		},
@@ -229,6 +237,14 @@ func generatedOperationDefs() []audit.OperationDef {
 		{
 			ID: "DeleteDeploymentPipeline", Action: "delete_deployment_pipeline", ResourceType: "deploymentpipeline",
 			Category: audit.CategoryManagement, RESTResourceParam: "deploymentPipelineName",
+		},
+		{
+			ID: "DeleteEndpoint", Action: "delete_endpoint", ResourceType: "endpoint",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
+		},
+		{
+			ID: "DeleteEndpointReleaseBinding", Action: "delete_endpoint_release_binding", ResourceType: "endpointreleasebinding",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointReleaseBindingName",
 		},
 		{
 			ID: "DeleteEnvironment", Action: "delete_environment", ResourceType: "environment",
@@ -385,6 +401,14 @@ func generatedOperationDefs() []audit.OperationDef {
 		{
 			ID: "UpdateDeploymentPipeline", Action: "update_deployment_pipeline", ResourceType: "deploymentpipeline",
 			Category: audit.CategoryManagement, RESTResourceParam: "deploymentPipelineName",
+		},
+		{
+			ID: "UpdateEndpoint", Action: "update_endpoint", ResourceType: "endpoint",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
+		},
+		{
+			ID: "UpdateEndpointReleaseBinding", Action: "update_endpoint_release_binding", ResourceType: "endpointreleasebinding",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointReleaseBindingName",
 		},
 		{
 			ID: "UpdateEnvironment", Action: "update_environment", ResourceType: "environment",

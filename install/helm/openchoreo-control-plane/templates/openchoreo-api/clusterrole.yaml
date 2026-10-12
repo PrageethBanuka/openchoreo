@@ -21,6 +21,7 @@ rules:
   - clusterworkflowplanes
   - clustercomponenttypes
   - clusterdataplanes
+  - clusterendpointtypes
   - clusterprojecttypes
   - clusterresourcetypes
   - clustertraits
@@ -35,6 +36,9 @@ rules:
   - deploymentpipelines
   - deployments
   - endpoints
+  - endpointreleasebindings
+  - endpointreleases
+  - endpointtypes
   - environments
   - gitrepositorywebhooks
   - observabilityalertsnotificationchannels
