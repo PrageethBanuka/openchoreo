@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	resourceTypeReleaseBinding = "releasebinding"
+	resourceTypeReleaseBinding         = "releasebinding"
+	resourceTypeEndpointReleaseBinding = "endpointreleasebinding"
 )
 
 // k8sResourcesServiceWithAuthz wraps a Service and adds authorization checks.
@@ -52,6 +53,20 @@ func (s *k8sResourcesServiceWithAuthz) GetResourceEvents(ctx context.Context, na
 		return nil, err
 	}
 	return s.internal.GetResourceEvents(ctx, namespaceName, releaseBindingName, group, version, kind, name)
+}
+
+func (s *k8sResourcesServiceWithAuthz) GetEndpointResourceTree(ctx context.Context, namespaceName, endpointReleaseBindingName string) (*K8sResourceTreeResult, error) {
+	if err := s.checkEndpointReleaseBindingAuthz(ctx, namespaceName, endpointReleaseBindingName); err != nil {
+		return nil, err
+	}
+	return s.internal.GetEndpointResourceTree(ctx, namespaceName, endpointReleaseBindingName)
+}
+
+func (s *k8sResourcesServiceWithAuthz) GetEndpointResourceEvents(ctx context.Context, namespaceName, endpointReleaseBindingName, group, version, kind, name string) (*models.ResourceEventsResponse, error) {
+	if err := s.checkEndpointReleaseBindingAuthz(ctx, namespaceName, endpointReleaseBindingName); err != nil {
+		return nil, err
+	}
+	return s.internal.GetEndpointResourceEvents(ctx, namespaceName, endpointReleaseBindingName, group, version, kind, name)
 }
 
 func (s *k8sResourcesServiceWithAuthz) GetResourceLogs(ctx context.Context, namespaceName, releaseBindingName, podName, container string, sinceSeconds *int64) (*models.ResourcePodLogsResponse, error) {
@@ -92,6 +107,32 @@ func (s *k8sResourcesServiceWithAuthz) checkReleaseBindingAuthzWithAction(ctx co
 			Namespace: namespaceName,
 			Project:   rb.Spec.Owner.ProjectName,
 			Component: rb.Spec.Owner.ComponentName,
+		},
+	})
+}
+
+// checkEndpointReleaseBindingAuthz fetches the endpoint release binding and checks
+// view authorization at the project level with the environment attribute, the same
+// as the endpoint release binding service.
+func (s *k8sResourcesServiceWithAuthz) checkEndpointReleaseBindingAuthz(ctx context.Context, namespaceName, endpointReleaseBindingName string) error {
+	var rb openchoreov1alpha1.EndpointReleaseBinding
+	if err := s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: endpointReleaseBindingName}, &rb); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return ErrEndpointReleaseBindingNotFound
+		}
+		return fmt.Errorf("failed to get endpoint release binding: %w", err)
+	}
+
+	return s.authz.Check(ctx, services.CheckRequest{
+		Action:       authz.ActionViewEndpointReleaseBinding,
+		ResourceType: resourceTypeEndpointReleaseBinding,
+		ResourceID:   endpointReleaseBindingName,
+		Hierarchy: authz.ResourceHierarchy{
+			Namespace: namespaceName,
+			Project:   rb.Spec.Owner.ProjectName,
+		},
+		Context: authz.Context{
+			Resource: authz.ResourceAttribute{Environment: services.FormatDualScopedResourceName(namespaceName, rb.Spec.Environment, false)},
 		},
 	})
 }

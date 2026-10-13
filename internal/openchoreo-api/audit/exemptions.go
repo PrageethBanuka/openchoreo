@@ -53,6 +53,8 @@ var RESTExemptions = map[string]string{
 	"GetEndpoint":                                 reasonRead,
 	"GetEndpointRelease":                          reasonRead,
 	"GetEndpointReleaseBinding":                   reasonRead,
+	"GetEndpointReleaseBindingK8sResourceEvents":  reasonRead,
+	"GetEndpointReleaseBindingK8sResourceTree":    reasonRead,
 	"GetEndpointType":                             reasonRead,
 	"GetEnvironment":                              reasonRead,
 	"GetHealth":                                   reasonRead,

@@ -3044,3 +3044,131 @@ func TestNewServiceWithAuthz(t *testing.T) {
 	svc := NewServiceWithAuthz(fc, gc, pdp, testTreeConfig(), testLogger())
 	require.NotNil(t, svc)
 }
+
+// --- GetEndpointResourceTree / GetEndpointResourceEvents ---
+
+func testEndpointReleaseBinding() *openchoreov1alpha1.EndpointReleaseBinding {
+	return &openchoreov1alpha1.EndpointReleaseBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "erb-1",
+			Namespace: testNamespace,
+			UID:       "erb-1-uid",
+		},
+		Spec: openchoreov1alpha1.EndpointReleaseBindingSpec{
+			Owner: openchoreov1alpha1.EndpointReleaseBindingOwner{
+				ProjectName:  "proj-1",
+				EndpointName: "payments-api",
+			},
+			Environment: "dev",
+		},
+	}
+}
+
+// testEndpointRenderedRelease is a RenderedRelease controlled by an EndpointReleaseBinding.
+func testEndpointRenderedRelease(erb *openchoreov1alpha1.EndpointReleaseBinding, resources []openchoreov1alpha1.RenderedManifestStatus) *openchoreov1alpha1.RenderedRelease {
+	return &openchoreov1alpha1.RenderedRelease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e-rr-1",
+			Namespace: testNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "openchoreo.dev/v1alpha1",
+					Kind:       "EndpointReleaseBinding",
+					Name:       erb.Name,
+					UID:        erb.UID,
+					Controller: boolPtr(true),
+				},
+			},
+		},
+		Spec: openchoreov1alpha1.RenderedReleaseSpec{
+			EnvironmentName: erb.Spec.Environment,
+			TargetPlane:     planeTypeDataPlane,
+		},
+		Status: openchoreov1alpha1.RenderedReleaseStatus{Resources: resources},
+	}
+}
+
+func TestGetEndpointResourceTree(t *testing.T) {
+	t.Run("nil gateway client returns error", func(t *testing.T) {
+		svc := newTestService(newFakeClient(), nil)
+
+		_, err := svc.GetEndpointResourceTree(context.Background(), testNamespace, "erb-1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "gateway client is not configured")
+	})
+
+	t.Run("endpoint release binding not found", func(t *testing.T) {
+		gc := testGatewayServer(t, func(w http.ResponseWriter, r *http.Request) {})
+		svc := newTestService(newFakeClient(), gc)
+
+		_, err := svc.GetEndpointResourceTree(context.Background(), testNamespace, "nonexistent")
+		require.ErrorIs(t, err, ErrEndpointReleaseBindingNotFound)
+	})
+
+	t.Run("a release binding name is not an endpoint release binding", func(t *testing.T) {
+		gc := testGatewayServer(t, func(w http.ResponseWriter, r *http.Request) {})
+		svc := newTestService(newFakeClient(testReleaseBinding()), gc)
+
+		_, err := svc.GetEndpointResourceTree(context.Background(), testNamespace, "rb-1")
+		require.ErrorIs(t, err, ErrEndpointReleaseBindingNotFound)
+	})
+
+	t.Run("returns only releases owned by the endpoint binding", func(t *testing.T) {
+		erb := testEndpointReleaseBinding()
+		rb := testReleaseBinding()
+		owned := []openchoreov1alpha1.RenderedManifestStatus{
+			{ID: "svc", Group: "", Version: "v1", Kind: "Service", Name: "e-payments-api-svc", Namespace: "dp-ns"},
+		}
+		endpointRR := testEndpointRenderedRelease(erb, owned)
+		// Same namespace and environment, but owned by a ReleaseBinding: must not appear.
+		componentRR := testRenderedRelease(rb, planeTypeDataPlane, []openchoreov1alpha1.RenderedManifestStatus{
+			{ID: "svc", Group: "", Version: "v1", Kind: "Service", Name: "web-svc", Namespace: "dp-ns"},
+		})
+		fc := newFakeClient(erb, rb, testEnvironment(), testDataPlane("default"), endpointRR, componentRR)
+
+		routeObj := k8sObject("v1", "Service", "dp-ns", "e-payments-api-svc", "svc-uid-1")
+		gc := testGatewayServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(jsonMarshal(t, routeObj))
+		})
+
+		result, err := newTestService(fc, gc).GetEndpointResourceTree(context.Background(), testNamespace, "erb-1")
+		require.NoError(t, err)
+		require.Len(t, result.RenderedReleases, 1)
+		assert.Equal(t, "e-rr-1", result.RenderedReleases[0].Name)
+		require.Len(t, result.RenderedReleases[0].Nodes, 1)
+		assert.Equal(t, "Service", result.RenderedReleases[0].Nodes[0].Kind)
+		assert.Equal(t, "e-payments-api-svc", result.RenderedReleases[0].Nodes[0].Name)
+	})
+
+	t.Run("the release binding tree excludes endpoint-owned releases", func(t *testing.T) {
+		erb := testEndpointReleaseBinding()
+		rb := testReleaseBinding()
+		endpointRR := testEndpointRenderedRelease(erb, nil)
+		fc := newFakeClient(erb, rb, testEnvironment(), testDataPlane("default"), endpointRR)
+		gc := testGatewayServer(t, func(w http.ResponseWriter, r *http.Request) {})
+
+		result, err := newTestService(fc, gc).GetResourceTree(context.Background(), testNamespace, "rb-1")
+		require.NoError(t, err)
+		assert.Empty(t, result.RenderedReleases)
+	})
+}
+
+func TestGetEndpointResourceEvents(t *testing.T) {
+	t.Run("nil gateway client returns error", func(t *testing.T) {
+		svc := newTestService(newFakeClient(), nil)
+
+		_, err := svc.GetEndpointResourceEvents(context.Background(), testNamespace, "erb-1", "gateway.networking.k8s.io", "v1", "HTTPRoute", "route")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "gateway client is not configured")
+	})
+
+	t.Run("endpoint release binding not found", func(t *testing.T) {
+		gc := testGatewayServer(t, func(w http.ResponseWriter, r *http.Request) {})
+		svc := newTestService(newFakeClient(), gc)
+
+		_, err := svc.GetEndpointResourceEvents(context.Background(), testNamespace, "nonexistent", "gateway.networking.k8s.io", "v1", "HTTPRoute", "route")
+		require.ErrorIs(t, err, ErrEndpointReleaseBindingNotFound)
+	})
+}

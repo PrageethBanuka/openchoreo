@@ -211,3 +211,72 @@ func TestTriggerCronJob_AuthzCheck(t *testing.T) {
 		require.Empty(t, pdp.Captured)
 	})
 }
+
+// --- GetEndpointResourceTree / GetEndpointResourceEvents ---
+
+func newAuthzSvcWithERB(t *testing.T, pdp *testutil.CapturingPDP) (*mocks.MockService, k8sresources.Service) {
+	t.Helper()
+	erb := testutil.NewEndpointReleaseBinding("ns-1", "proj-1", "payments-api", "dev", "erb-1")
+	fakeClient := testutil.NewFakeClient(erb)
+	mockSvc := mocks.NewMockService(t)
+	svc := k8sresources.NewTestServiceWithAuthz(mockSvc, fakeClient, pdp, testutil.TestLogger())
+	return mockSvc, svc
+}
+
+func TestGetEndpointResourceTree_AuthzCheck(t *testing.T) {
+	t.Run("allowed checks the project with the environment", func(t *testing.T) {
+		pdp := testutil.AllowPDP()
+		mockSvc, svc := newAuthzSvcWithERB(t, pdp)
+		expected := &k8sresources.K8sResourceTreeResult{}
+		mockSvc.On("GetEndpointResourceTree", mock.Anything, "ns-1", "erb-1").Return(expected, nil)
+
+		result, err := svc.GetEndpointResourceTree(testutil.AuthzContext(), "ns-1", "erb-1")
+		require.NoError(t, err)
+		require.Equal(t, expected, result)
+		require.Len(t, pdp.Captured, 1)
+		testutil.RequireEvalRequest(t, pdp.Captured[0],
+			"endpointreleasebinding:view", "endpointreleasebinding", "erb-1",
+			authzcore.ResourceHierarchy{Namespace: "ns-1", Project: "proj-1"})
+		require.Equal(t, "ns-1/dev", pdp.Captured[0].Context.Resource.Environment)
+	})
+
+	t.Run("denied", func(t *testing.T) {
+		_, svc := newAuthzSvcWithERB(t, testutil.DenyPDP())
+
+		_, err := svc.GetEndpointResourceTree(testutil.AuthzContext(), "ns-1", "erb-1")
+		require.ErrorIs(t, err, services.ErrForbidden)
+	})
+
+	t.Run("binding not found skips authz", func(t *testing.T) {
+		pdp := testutil.AllowPDP()
+		_, svc := newAuthzSvcWithERB(t, pdp)
+
+		_, err := svc.GetEndpointResourceTree(testutil.AuthzContext(), "ns-1", "nonexistent")
+		require.ErrorIs(t, err, k8sresources.ErrEndpointReleaseBindingNotFound)
+		require.Empty(t, pdp.Captured)
+	})
+}
+
+func TestGetEndpointResourceEvents_AuthzCheck(t *testing.T) {
+	t.Run("allowed", func(t *testing.T) {
+		pdp := testutil.AllowPDP()
+		mockSvc, svc := newAuthzSvcWithERB(t, pdp)
+		expected := &models.ResourceEventsResponse{Events: []models.ResourceEvent{{Reason: "Accepted"}}}
+		mockSvc.On("GetEndpointResourceEvents", mock.Anything, "ns-1", "erb-1", "gateway.networking.k8s.io", "v1", "HTTPRoute", "route").
+			Return(expected, nil)
+
+		result, err := svc.GetEndpointResourceEvents(testutil.AuthzContext(), "ns-1", "erb-1", "gateway.networking.k8s.io", "v1", "HTTPRoute", "route")
+		require.NoError(t, err)
+		require.Equal(t, expected, result)
+		testutil.RequireEvalRequest(t, pdp.Captured[0],
+			"endpointreleasebinding:view", "endpointreleasebinding", "erb-1",
+			authzcore.ResourceHierarchy{Namespace: "ns-1", Project: "proj-1"})
+	})
+
+	t.Run("denied", func(t *testing.T) {
+		_, svc := newAuthzSvcWithERB(t, testutil.DenyPDP())
+
+		_, err := svc.GetEndpointResourceEvents(testutil.AuthzContext(), "ns-1", "erb-1", "", "v1", "Pod", "p")
+		require.ErrorIs(t, err, services.ErrForbidden)
+	})
+}

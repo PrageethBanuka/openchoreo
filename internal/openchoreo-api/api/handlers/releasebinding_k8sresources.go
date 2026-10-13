@@ -33,29 +33,9 @@ func (h *Handler) GetReleaseBindingK8sResourceTree(
 		return h.handleK8sResourceTreeError(err)
 	}
 
-	genReleases := make([]gen.ReleaseResourceTree, 0, len(result.RenderedReleases))
-	for _, r := range result.RenderedReleases {
-		nodes, err := convertList[models.ResourceNode, gen.ResourceNode](r.Nodes)
-		if err != nil {
-			h.logger.Error("Failed to convert resource nodes", "error", err)
-			return gen.GetReleaseBindingK8sResourceTree500JSONResponse{InternalErrorJSONResponse: internalError()}, nil
-		}
-		entry := gen.ReleaseResourceTree{
-			Name:        r.Name,
-			TargetPlane: gen.ReleaseResourceTreeTargetPlane(r.TargetPlane),
-			Nodes:       nodes,
-		}
-
-		if r.Release != nil {
-			genRelease, err := convert[openchoreov1alpha1.RenderedRelease, gen.RenderedRelease](*r.Release)
-			if err != nil {
-				h.logger.Error("Failed to convert rendered release", "error", err)
-				return gen.GetReleaseBindingK8sResourceTree500JSONResponse{InternalErrorJSONResponse: internalError()}, nil
-			}
-			entry.RenderedRelease = &genRelease
-		}
-
-		genReleases = append(genReleases, entry)
+	genReleases, err := h.convertResourceTree(result)
+	if err != nil {
+		return gen.GetReleaseBindingK8sResourceTree500JSONResponse{InternalErrorJSONResponse: internalError()}, nil
 	}
 
 	return gen.GetReleaseBindingK8sResourceTree200JSONResponse{
@@ -322,4 +302,34 @@ func (h *Handler) handleK8sResourceLogsError(err error) (gen.GetReleaseBindingK8
 	}
 	h.logger.Error("Failed to get k8s resource logs", "error", err)
 	return gen.GetReleaseBindingK8sResourceLogs500JSONResponse{InternalErrorJSONResponse: internalError()}, nil
+}
+
+// convertResourceTree converts a service tree result into its API representation.
+// It logs the failure, so callers only need to answer with a 500.
+func (h *Handler) convertResourceTree(result *k8sresourcessvc.K8sResourceTreeResult) ([]gen.ReleaseResourceTree, error) {
+	genReleases := make([]gen.ReleaseResourceTree, 0, len(result.RenderedReleases))
+	for _, r := range result.RenderedReleases {
+		nodes, err := convertList[models.ResourceNode, gen.ResourceNode](r.Nodes)
+		if err != nil {
+			h.logger.Error("Failed to convert resource nodes", "error", err)
+			return nil, err
+		}
+		entry := gen.ReleaseResourceTree{
+			Name:        r.Name,
+			TargetPlane: gen.ReleaseResourceTreeTargetPlane(r.TargetPlane),
+			Nodes:       nodes,
+		}
+
+		if r.Release != nil {
+			genRelease, err := convert[openchoreov1alpha1.RenderedRelease, gen.RenderedRelease](*r.Release)
+			if err != nil {
+				h.logger.Error("Failed to convert rendered release", "error", err)
+				return nil, err
+			}
+			entry.RenderedRelease = &genRelease
+		}
+
+		genReleases = append(genReleases, entry)
+	}
+	return genReleases, nil
 }

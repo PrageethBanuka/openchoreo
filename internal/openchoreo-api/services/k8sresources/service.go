@@ -109,6 +109,28 @@ func (s *k8sResourcesService) GetResourceTree(ctx context.Context, namespaceName
 		return nil, err
 	}
 
+	return s.buildResourceTree(ctx, releaseContexts), nil
+}
+
+// GetEndpointResourceTree returns hierarchical views of all live Kubernetes
+// resources deployed by the RenderedReleases owned by an EndpointReleaseBinding.
+func (s *k8sResourcesService) GetEndpointResourceTree(ctx context.Context, namespaceName, endpointReleaseBindingName string) (*K8sResourceTreeResult, error) {
+	s.logger.Debug("Getting endpoint k8s resource tree", "namespace", namespaceName, "endpointReleaseBinding", endpointReleaseBindingName)
+
+	if s.gatewayClient == nil {
+		return nil, fmt.Errorf("gateway client is not configured")
+	}
+
+	releaseContexts, _, err := s.resolveEndpointReleaseContexts(ctx, namespaceName, endpointReleaseBindingName)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.buildResourceTree(ctx, releaseContexts), nil
+}
+
+// buildResourceTree walks the live resources of each release context.
+func (s *k8sResourcesService) buildResourceTree(ctx context.Context, releaseContexts []releaseContext) *K8sResourceTreeResult {
 	walkCtx, cancel := s.withWalkDeadline(ctx)
 	defer cancel()
 
@@ -123,7 +145,7 @@ func (s *k8sResourcesService) GetResourceTree(ctx context.Context, namespaceName
 		})
 	}
 
-	return &K8sResourceTreeResult{RenderedReleases: renderedReleases}, nil
+	return &K8sResourceTreeResult{RenderedReleases: renderedReleases}
 }
 
 // GetResourceEvents returns Kubernetes events for a specific resource in the release binding's resource tree.
@@ -140,6 +162,29 @@ func (s *k8sResourcesService) GetResourceEvents(ctx context.Context, namespaceNa
 		return nil, err
 	}
 
+	return s.fetchResourceEvents(ctx, releaseContexts, dropped, group, version, kind, name)
+}
+
+// GetEndpointResourceEvents returns Kubernetes events for a specific resource in
+// the EndpointReleaseBinding's resource tree.
+func (s *k8sResourcesService) GetEndpointResourceEvents(ctx context.Context, namespaceName, endpointReleaseBindingName, group, version, kind, name string) (*models.ResourceEventsResponse, error) {
+	s.logger.Debug("Getting endpoint k8s resource events", "namespace", namespaceName, "endpointReleaseBinding", endpointReleaseBindingName,
+		"group", group, "version", version, "kind", kind, "name", name)
+
+	if s.gatewayClient == nil {
+		return nil, fmt.Errorf("gateway client is not configured")
+	}
+
+	releaseContexts, dropped, err := s.resolveEndpointReleaseContexts(ctx, namespaceName, endpointReleaseBindingName)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.fetchResourceEvents(ctx, releaseContexts, dropped, group, version, kind, name)
+}
+
+// fetchResourceEvents finds the named resource in the release contexts and returns its events.
+func (s *k8sResourcesService) fetchResourceEvents(ctx context.Context, releaseContexts []releaseContext, dropped []*openchoreov1alpha1.RenderedRelease, group, version, kind, name string) (*models.ResourceEventsResponse, error) {
 	// Events can name a resource in any plane, so any dropped release leaves the
 	// search incomplete.
 	rc, resourceNS, err := s.resolveTreeResource(ctx, releaseContexts, group, version, kind, name, len(dropped) > 0)
@@ -298,7 +343,6 @@ func (s *k8sResourcesService) resolvePodContainers(ctx context.Context, pi plane
 // that as an incomplete search rather than proof the resource is absent, so it is
 // surfaced rather than only logged.
 func (s *k8sResourcesService) resolveReleaseContexts(ctx context.Context, namespaceName, releaseBindingName string) ([]releaseContext, []*openchoreov1alpha1.RenderedRelease, error) {
-	// 1. Fetch the ReleaseBinding
 	var rb openchoreov1alpha1.ReleaseBinding
 	if err := s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: releaseBindingName}, &rb); err != nil {
 		if client.IgnoreNotFound(err) == nil {
@@ -307,7 +351,27 @@ func (s *k8sResourcesService) resolveReleaseContexts(ctx context.Context, namesp
 		return nil, nil, fmt.Errorf("failed to get release binding: %w", err)
 	}
 
-	// 2. List Releases in the same namespace, filter by owner
+	return s.resolveOwnedReleaseContexts(ctx, namespaceName, &rb, rb.Spec.Environment)
+}
+
+// resolveEndpointReleaseContexts is resolveReleaseContexts for an
+// EndpointReleaseBinding, whose rendered route is owned the same way.
+func (s *k8sResourcesService) resolveEndpointReleaseContexts(ctx context.Context, namespaceName, endpointReleaseBindingName string) ([]releaseContext, []*openchoreov1alpha1.RenderedRelease, error) {
+	var rb openchoreov1alpha1.EndpointReleaseBinding
+	if err := s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: endpointReleaseBindingName}, &rb); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil, ErrEndpointReleaseBindingNotFound
+		}
+		return nil, nil, fmt.Errorf("failed to get endpoint release binding: %w", err)
+	}
+
+	return s.resolveOwnedReleaseContexts(ctx, namespaceName, &rb, rb.Spec.Environment)
+}
+
+// resolveOwnedReleaseContexts finds the RenderedReleases controlled by owner and
+// resolves plane info for each, using the owner's environment.
+func (s *k8sResourcesService) resolveOwnedReleaseContexts(ctx context.Context, namespaceName string, owner client.Object, environmentName string) ([]releaseContext, []*openchoreov1alpha1.RenderedRelease, error) {
+	// List Releases in the same namespace, filter by owner
 	var releaseList openchoreov1alpha1.RenderedReleaseList
 	if err := s.k8sClient.List(ctx, &releaseList, client.InNamespace(namespaceName)); err != nil {
 		return nil, nil, fmt.Errorf("failed to list releases: %w", err)
@@ -316,7 +380,7 @@ func (s *k8sResourcesService) resolveReleaseContexts(ctx context.Context, namesp
 	var ownedReleases []*openchoreov1alpha1.RenderedRelease
 	for i := range releaseList.Items {
 		release := &releaseList.Items[i]
-		if metav1.IsControlledBy(release, &rb) {
+		if metav1.IsControlledBy(release, owner) {
 			ownedReleases = append(ownedReleases, release)
 		}
 	}
@@ -329,7 +393,7 @@ func (s *k8sResourcesService) resolveReleaseContexts(ctx context.Context, namesp
 
 	// 3. Resolve environment and plane info
 	env := &openchoreov1alpha1.Environment{}
-	if err := s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: rb.Spec.Environment}, env); err != nil {
+	if err := s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: environmentName}, env); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			return nil, nil, ErrEnvironmentNotFound
 		}

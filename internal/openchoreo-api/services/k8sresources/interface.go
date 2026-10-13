@@ -27,6 +27,8 @@ type K8sResourceTreeResult struct {
 type Service interface {
 	GetResourceTree(ctx context.Context, namespaceName, releaseBindingName string) (*K8sResourceTreeResult, error)
 	GetResourceEvents(ctx context.Context, namespaceName, releaseBindingName, group, version, kind, name string) (*models.ResourceEventsResponse, error)
+	GetEndpointResourceTree(ctx context.Context, namespaceName, endpointReleaseBindingName string) (*K8sResourceTreeResult, error)
+	GetEndpointResourceEvents(ctx context.Context, namespaceName, endpointReleaseBindingName, group, version, kind, name string) (*models.ResourceEventsResponse, error)
 	GetResourceLogs(ctx context.Context, namespaceName, releaseBindingName, podName, container string, sinceSeconds *int64) (*models.ResourcePodLogsResponse, error)
 	TriggerCronJob(ctx context.Context, namespaceName, releaseBindingName string, overrides *models.CronJobTriggerRequest) (*models.CronJobTriggerResponse, error)
 }
