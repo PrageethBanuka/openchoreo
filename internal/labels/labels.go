@@ -111,6 +111,12 @@ const (
 	// the controller falls back to the first route match path (the prefix-routing convention).
 	AnnotationKeyEndpointBasePath = "openchoreo.dev/endpoint-base-path"
 
+	// AnnotationKeyEndpointCreatedFrom records how an Endpoint was created:
+	// "workload/<component>/<endpoint>" when a Workload endpoint declared it, or
+	// "portal" when a person created it. It is history only and never changes
+	// how the Endpoint behaves.
+	AnnotationKeyEndpointCreatedFrom = "openchoreo.dev/created-from"
+
 	LabelValueManagedBy = "openchoreo-control-plane"
 	// LabelValueTrue is the standard "true" value for boolean labels
 	LabelValueTrue = "true"

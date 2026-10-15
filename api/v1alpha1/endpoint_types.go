@@ -24,11 +24,20 @@ type EndpointSpec struct {
 	// BackendRefs lists the component endpoints this Endpoint routes traffic to,
 	// with relative weights. Like a Service selecting Pods, the Endpoint does not
 	// own the referenced components.
-	// +kubebuilder:validation:MinItems=1
+	// An Endpoint may be left with no backends; see ReclaimPolicy.
+	// +optional
 	// +listType=map
 	// +listMapKey=componentName
 	// +listMapKey=endpoint
-	BackendRefs []EndpointBackendRef `json:"backendRefs"`
+	BackendRefs []EndpointBackendRef `json:"backendRefs,omitempty"`
+
+	// ReclaimPolicy decides what happens when the Endpoint has no backends left,
+	// for example after its last backend component was deleted. Delete removes
+	// the Endpoint and hands its URL back; Retain keeps it as Orphaned, without
+	// routes, until a backend is added.
+	// +optional
+	// +kubebuilder:default=Delete
+	ReclaimPolicy EndpointReclaimPolicy `json:"reclaimPolicy,omitempty"`
 
 	// Parameters contains values for the parameter schema declared on the referenced
 	// EndpointType (or ClusterEndpointType). Validated against the schema by the
@@ -38,6 +47,17 @@ type EndpointSpec struct {
 	// +kubebuilder:validation:Schemaless
 	Parameters *runtime.RawExtension `json:"parameters,omitempty"`
 }
+
+// EndpointReclaimPolicy decides what happens to an Endpoint with no backends.
+// +kubebuilder:validation:Enum=Delete;Retain
+type EndpointReclaimPolicy string
+
+const (
+	// EndpointReclaimPolicyDelete deletes an Endpoint once it has no backends.
+	EndpointReclaimPolicyDelete EndpointReclaimPolicy = "Delete"
+	// EndpointReclaimPolicyRetain keeps an Endpoint with no backends as Orphaned.
+	EndpointReclaimPolicyRetain EndpointReclaimPolicy = "Retain"
+)
 
 // EndpointOwner identifies the project that owns an Endpoint.
 type EndpointOwner struct {

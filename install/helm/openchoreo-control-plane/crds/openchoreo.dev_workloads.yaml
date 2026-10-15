@@ -279,6 +279,39 @@ spec:
                       description: DisplayName is an optional human-readable name
                         for the endpoint.
                       type: string
+                    endpointName:
+                      description: |-
+                        EndpointName is the name of the Endpoint that serves this endpoint.
+                        Defaults to <component>-<endpoint>. Only used when endpointType is set.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    endpointType:
+                      description: |-
+                        EndpointType serves this endpoint through an Endpoint of the given type.
+                        When set, the Component controller creates the Endpoint if it is missing,
+                        with this component as its only backend. The Endpoint is not owned by the
+                        component: it has its own lifecycle. When unset, the endpoint keeps the
+                        route its ComponentType renders.
+                      properties:
+                        kind:
+                          default: EndpointType
+                          description: Kind is the kind of endpoint type (EndpointType
+                            or ClusterEndpointType).
+                          enum:
+                          - EndpointType
+                          - ClusterEndpointType
+                          type: string
+                        name:
+                          description: |-
+                            Name is the name of the EndpointType or ClusterEndpointType to reference.
+                            Must be a valid DNS-1123 label since it identifies a Kubernetes object.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - name
+                      type: object
                     port:
                       description: Port exposed by the endpoint. If targetPort is
                         not set, platform defaults to port for both.

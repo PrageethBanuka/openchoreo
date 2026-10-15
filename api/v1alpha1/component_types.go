@@ -144,6 +144,41 @@ type ComponentStatus struct {
 	// deployed to the first environment, if the autoDeploy flag is set to true
 	// +optional
 	LatestRelease *LatestRelease `json:"latestRelease,omitempty"`
+
+	// Endpoints lists the Endpoints that route to this component, with the
+	// weight each gives it per environment. It is a reverse index derived from
+	// Endpoint backendRefs and the releases their bindings pin; the component
+	// does not own these Endpoints.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +listMapKey=endpoint
+	Endpoints []ComponentEndpointRef `json:"endpoints,omitempty"`
+}
+
+// ComponentEndpointRef is one entry of a component's reverse index of Endpoints.
+type ComponentEndpointRef struct {
+	// Name of the Endpoint.
+	Name string `json:"name"`
+
+	// Endpoint is the workload endpoint of this component the Endpoint routes to.
+	Endpoint string `json:"endpoint"`
+
+	// Environments lists the weight this component has in the release pinned in
+	// each environment where the Endpoint is bound.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Environments []ComponentEndpointEnvironment `json:"environments,omitempty"`
+}
+
+// ComponentEndpointEnvironment is the weight a component has in one environment.
+type ComponentEndpointEnvironment struct {
+	// Name of the environment.
+	Name string `json:"name"`
+
+	// Weight of this component's backend in the pinned EndpointRelease.
+	Weight int32 `json:"weight"`
 }
 
 // LatestRelease has name and generated hash of the latest ComponentRelease spec

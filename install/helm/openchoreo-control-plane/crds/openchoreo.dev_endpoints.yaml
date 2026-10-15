@@ -60,6 +60,7 @@ spec:
                   BackendRefs lists the component endpoints this Endpoint routes traffic to,
                   with relative weights. Like a Service selecting Pods, the Endpoint does not
                   own the referenced components.
+                  An Endpoint may be left with no backends; see ReclaimPolicy.
                 items:
                   description: |-
                     EndpointBackendRef references a named workload endpoint of a component as a
@@ -92,7 +93,6 @@ spec:
                   - componentName
                   - endpoint
                   type: object
-                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - componentName
@@ -118,6 +118,17 @@ spec:
                   EndpointType (or ClusterEndpointType). Validated against the schema by the
                   Endpoint controller; failures surface via status.conditions.
                 x-kubernetes-preserve-unknown-fields: true
+              reclaimPolicy:
+                default: Delete
+                description: |-
+                  ReclaimPolicy decides what happens when the Endpoint has no backends left,
+                  for example after its last backend component was deleted. Delete removes
+                  the Endpoint and hands its URL back; Retain keeps it as Orphaned, without
+                  routes, until a backend is added.
+                enum:
+                - Delete
+                - Retain
+                type: string
               type:
                 description: |-
                   Type references the EndpointType or ClusterEndpointType template for this Endpoint.
@@ -145,7 +156,6 @@ spec:
                 - message: spec.type cannot be changed after creation
                   rule: self == oldSelf
             required:
-            - backendRefs
             - owner
             - type
             type: object

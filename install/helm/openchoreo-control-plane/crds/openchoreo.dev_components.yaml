@@ -233,6 +233,56 @@ spec:
                   - type
                   type: object
                 type: array
+              endpoints:
+                description: |-
+                  Endpoints lists the Endpoints that route to this component, with the
+                  weight each gives it per environment. It is a reverse index derived from
+                  Endpoint backendRefs and the releases their bindings pin; the component
+                  does not own these Endpoints.
+                items:
+                  description: ComponentEndpointRef is one entry of a component's
+                    reverse index of Endpoints.
+                  properties:
+                    endpoint:
+                      description: Endpoint is the workload endpoint of this component
+                        the Endpoint routes to.
+                      type: string
+                    environments:
+                      description: |-
+                        Environments lists the weight this component has in the release pinned in
+                        each environment where the Endpoint is bound.
+                      items:
+                        description: ComponentEndpointEnvironment is the weight a
+                          component has in one environment.
+                        properties:
+                          name:
+                            description: Name of the environment.
+                            type: string
+                          weight:
+                            description: Weight of this component's backend in the
+                              pinned EndpointRelease.
+                            format: int32
+                            type: integer
+                        required:
+                        - name
+                        - weight
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
+                    name:
+                      description: Name of the Endpoint.
+                      type: string
+                  required:
+                  - endpoint
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                - endpoint
+                x-kubernetes-list-type: map
               latestRelease:
                 description: |-
                   LatestRelease keeps the information of the latest ComponentRelease created for this component
