@@ -17,11 +17,14 @@ import (
 // EndpointUsage is one backend of an Endpoint that points at a component, with
 // the weight the release pinned in one environment gives it. Environment is
 // empty for an Endpoint that is not bound in any environment yet.
+// OtherBackends counts the release's backends that are not this component, so
+// callers can tell whether the traffic could be moved elsewhere.
 type EndpointUsage struct {
 	Endpoint         string
 	WorkloadEndpoint string
 	Environment      string
 	Weight           int32
+	OtherBackends    int
 }
 
 // EndpointBackendWeight returns the effective weight of a backendRef. An unset
@@ -84,6 +87,12 @@ func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, pro
 			return nil, fmt.Errorf("get endpoint release %s: %w", b.Spec.EndpointRelease, err)
 		}
 		bound[b.Spec.Owner.EndpointName] = true
+		others := 0
+		for _, ref := range rel.Spec.BackendRefs {
+			if ref.ComponentName != component {
+				others++
+			}
+		}
 		for _, wl := range wls {
 			var weight int32
 			for _, ref := range rel.Spec.BackendRefs {
@@ -96,6 +105,7 @@ func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, pro
 				WorkloadEndpoint: wl,
 				Environment:      b.Spec.Environment,
 				Weight:           weight,
+				OtherBackends:    others,
 			})
 		}
 	}
@@ -122,12 +132,15 @@ func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, pro
 	return usages, nil
 }
 
-// RoutedEndpointUsage returns the usages that send traffic to the component,
-// that is with a weight above 0 in some environment.
+// RoutedEndpointUsage returns the usages that block deleting the component: it
+// has a weight above 0 in some environment and the release has other backends
+// the traffic can be moved to first. A component that is the only backend of a
+// release can be deleted; its Endpoint then has no backends and its
+// reclaimPolicy applies.
 func RoutedEndpointUsage(usages []EndpointUsage) []EndpointUsage {
 	var out []EndpointUsage
 	for _, u := range usages {
-		if u.Environment != "" && u.Weight > 0 {
+		if u.Environment != "" && u.Weight > 0 && u.OtherBackends > 0 {
 			out = append(out, u)
 		}
 	}

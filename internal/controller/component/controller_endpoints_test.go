@@ -226,6 +226,7 @@ func TestFinalizeHoldsWhileStillRouted(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "rel", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointReleaseSpec{BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
 			{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](100)},
+			{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](0)},
 		}},
 	}
 	binding := &openchoreov1alpha1.EndpointReleaseBinding{
@@ -255,4 +256,35 @@ func TestFinalizeHoldsWhileStillRouted(t *testing.T) {
 	require.NotNil(t, cond)
 	assert.Equal(t, string(ReasonStillRouted), cond.Reason)
 	assert.Contains(t, cond.Message, "payments-api in development (weight 100)")
+}
+
+func TestPruneFromEndpoints(t *testing.T) {
+	shared := &openchoreov1alpha1.Endpoint{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},
+		Spec: openchoreov1alpha1.EndpointSpec{
+			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
+				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](0)},
+				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](100)},
+			},
+		},
+	}
+	otherProject := &openchoreov1alpha1.Endpoint{
+		ObjectMeta: metav1.ObjectMeta{Name: "billing-api", Namespace: testNS},
+		Spec: openchoreov1alpha1.EndpointSpec{
+			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: "billing"},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "http"}},
+		},
+	}
+	r := newEndpointsReconciler(t, shared, otherProject)
+	require.NoError(t, r.pruneFromEndpoints(context.Background(), testComponent()))
+
+	got := &openchoreov1alpha1.Endpoint{}
+	require.NoError(t, r.Get(context.Background(), client.ObjectKeyFromObject(shared), got))
+	assert.Equal(t, []openchoreov1alpha1.EndpointBackendRef{
+		{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](100)},
+	}, got.Spec.BackendRefs)
+
+	require.NoError(t, r.Get(context.Background(), client.ObjectKeyFromObject(otherProject), got))
+	assert.Len(t, got.Spec.BackendRefs, 1, "Endpoints of other projects are untouched")
 }

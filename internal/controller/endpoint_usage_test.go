@@ -84,14 +84,20 @@ func TestComponentEndpointUsage(t *testing.T) {
 	usages, err := ComponentEndpointUsage(context.Background(), c, "default", "shop", "payments-v1")
 	require.NoError(t, err)
 	assert.Equal(t, []EndpointUsage{
-		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "development", Weight: 0},
-		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90},
+		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "development", Weight: 0, OtherBackends: 1},
+		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90, OtherBackends: 1},
 		{Endpoint: "preview", WorkloadEndpoint: "http"},
 	}, usages)
 
 	assert.Equal(t, []EndpointUsage{
-		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90},
+		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90, OtherBackends: 1},
 	}, RoutedEndpointUsage(usages))
+
+	// The only backend of a release doesn't block deletion: there is nowhere to
+	// move its traffic, and the Endpoint's reclaimPolicy takes over.
+	assert.Empty(t, RoutedEndpointUsage([]EndpointUsage{
+		{Endpoint: "solo", WorkloadEndpoint: "http", Environment: "production", Weight: 100},
+	}))
 
 	assert.Equal(t, []openchoreov1alpha1.ComponentEndpointRef{
 		{Name: "payments-api", Endpoint: "http", Environments: []openchoreov1alpha1.ComponentEndpointEnvironment{

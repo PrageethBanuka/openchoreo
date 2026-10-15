@@ -141,6 +141,24 @@ var _ = Describe("Endpoint Controller", func() {
 		Expect(updated.Status.LatestRelease).To(BeNil())
 	})
 
+	It("does not block on a missing backend staged at weight 0", func() {
+		createClusterEndpointType("cet-staged")
+		createComponent("staged-v1", project)
+
+		ep := createEndpoint("ep-staged",
+			openchoreov1alpha1.EndpointTypeRef{
+				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
+				Name: "cet-staged",
+			},
+			openchoreov1alpha1.EndpointBackendRef{ComponentName: "staged-v1", Endpoint: "api", Weight: ptr.To[int32](100)},
+			openchoreov1alpha1.EndpointBackendRef{ComponentName: "staged-v2-not-yet", Endpoint: "api", Weight: ptr.To[int32](0)})
+
+		updated := reconcileAndGet(ep)
+
+		Expect(readyCondition(updated).Status).To(Equal(metav1.ConditionTrue))
+		Expect(updated.Status.LatestRelease).NotTo(BeNil())
+	})
+
 	It("cuts an EndpointRelease that snapshots the type and backends, and a new one when weights change", func() {
 		createClusterEndpointType("cet-release")
 		createComponent("release-v1", project)

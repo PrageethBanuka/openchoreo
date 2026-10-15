@@ -10,6 +10,7 @@ import (
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -62,6 +63,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
+	// With no backends left and reclaimPolicy Delete, the Endpoint is deleted.
+	// Its finalizer releases the claims, which hands the URL back.
+	if len(ep.Spec.BackendRefs) == 0 && ep.Spec.ReclaimPolicy != openchoreov1alpha1.EndpointReclaimPolicyRetain {
+		logger.Info("Endpoint has no backends left; deleting it (reclaimPolicy Delete)")
+		if err := r.Delete(ctx, ep); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("delete Endpoint with no backends: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	return r.reconcile(ctx, old, ep)
 }
 
@@ -80,6 +91,11 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 			rErr = kerrors.NewAggregate([]error{rErr, err})
 		}
 	}()
+
+	if len(ep.Spec.BackendRefs) == 0 {
+		return ctrl.Result{}, r.keepOrphaned(ctx, ep)
+	}
+	meta.RemoveStatusCondition(&ep.Status.Conditions, string(ConditionOrphaned))
 
 	snapshot, err := r.resolveType(ctx, ep)
 	if err != nil {
@@ -161,13 +177,29 @@ func (r *Reconciler) resolveType(ctx context.Context, ep *openchoreov1alpha1.End
 	}
 }
 
+// keepOrphaned handles an Endpoint with no backends left and reclaimPolicy
+// Retain: it stays as Orphaned, its bindings are deleted so it routes nothing,
+// and adding a backend brings it back.
+func (r *Reconciler) keepOrphaned(ctx context.Context, ep *openchoreov1alpha1.Endpoint) error {
+	controller.MarkTrueCondition(ep, ConditionOrphaned, ReasonNoBackends,
+		"No backends left; kept without routes until a backend is added (reclaimPolicy Retain)")
+	controller.MarkFalseCondition(ep, ConditionReady, ReasonNoBackends, "Endpoint has no backends")
+	_, err := r.deleteOwnedEndpointReleaseBindings(ctx, ep)
+	return err
+}
+
 // missingBackendComponents returns the distinct backend component names that do
-// not exist as Components of the Endpoint's project. Whether the referenced
-// workload endpoint exists is checked per environment by the binding controller.
+// not exist as Components of the Endpoint's project. Backends at weight 0 are
+// skipped: they receive no traffic, so a canary can be staged before its
+// component exists. Whether the referenced workload endpoint exists is checked
+// per environment by the binding controller.
 func (r *Reconciler) missingBackendComponents(ctx context.Context, ep *openchoreov1alpha1.Endpoint) ([]string, error) {
 	var missing []string
 	seen := make(map[string]struct{}, len(ep.Spec.BackendRefs))
 	for _, ref := range ep.Spec.BackendRefs {
+		if controller.EndpointBackendWeight(ref) == 0 {
+			continue
+		}
 		if _, ok := seen[ref.ComponentName]; ok {
 			continue
 		}

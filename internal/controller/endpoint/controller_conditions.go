@@ -19,6 +19,10 @@ const (
 
 	// ConditionFinalizing indicates the Endpoint is being finalized (deleted).
 	ConditionFinalizing controller.ConditionType = "Finalizing"
+
+	// ConditionOrphaned is True while the Endpoint has no backends left. What
+	// happens next is decided by spec.reclaimPolicy.
+	ConditionOrphaned controller.ConditionType = "Orphaned"
 )
 
 // Constants for condition reasons
@@ -35,6 +39,9 @@ const (
 	// ReasonBackendNotFound indicates a backendRef names a Component that does
 	// not exist in the Endpoint's project.
 	ReasonBackendNotFound controller.ConditionReason = "BackendNotFound"
+
+	// ReasonNoBackends indicates the Endpoint has no backendRefs left.
+	ReasonNoBackends controller.ConditionReason = "NoBackends"
 
 	// ReasonFinalizing indicates the Endpoint is being finalized.
 	ReasonFinalizing controller.ConditionReason = "Finalizing"

@@ -152,7 +152,8 @@ func (r *Reconciler) updateEndpointIndex(ctx context.Context, comp *openchoreov1
 }
 
 // stillRouted returns a message naming where the component still receives
-// traffic through an Endpoint, or "" when it receives none.
+// traffic through an Endpoint that has other backends to move it to, or ""
+// when deleting it breaks no route that could be kept.
 func (r *Reconciler) stillRouted(ctx context.Context, comp *openchoreov1alpha1.Component) (string, error) {
 	usages, err := controller.ComponentEndpointUsage(ctx, r.Client, comp.Namespace, comp.Spec.Owner.ProjectName, comp.Name)
 	if err != nil {
@@ -168,6 +169,40 @@ func (r *Reconciler) stillRouted(ctx context.Context, comp *openchoreov1alpha1.C
 	}
 	return "Still receives traffic through " + strings.Join(parts, ", ") +
 		"; move its weight to 0 and roll out before deleting", nil
+}
+
+// pruneFromEndpoints removes the component from the backends of every Endpoint
+// in its project. It runs during deletion, once stillRouted has confirmed no
+// Endpoint sends the component traffic, so the Endpoints keep serving through
+// their other backends. An Endpoint left with no backends is handled by its
+// reclaimPolicy in the Endpoint controller.
+func (r *Reconciler) pruneFromEndpoints(ctx context.Context, comp *openchoreov1alpha1.Component) error {
+	var endpoints openchoreov1alpha1.EndpointList
+	if err := r.List(ctx, &endpoints, client.InNamespace(comp.Namespace)); err != nil {
+		return fmt.Errorf("list endpoints: %w", err)
+	}
+	for i := range endpoints.Items {
+		ep := &endpoints.Items[i]
+		if ep.Spec.Owner.ProjectName != comp.Spec.Owner.ProjectName {
+			continue
+		}
+		kept := make([]openchoreov1alpha1.EndpointBackendRef, 0, len(ep.Spec.BackendRefs))
+		for _, ref := range ep.Spec.BackendRefs {
+			if ref.ComponentName != comp.Name {
+				kept = append(kept, ref)
+			}
+		}
+		if len(kept) == len(ep.Spec.BackendRefs) {
+			continue
+		}
+		patch := client.MergeFrom(ep.DeepCopy())
+		ep.Spec.BackendRefs = kept
+		if err := r.Patch(ctx, ep, patch); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("remove %s from endpoint %s: %w", comp.Name, ep.Name, err)
+		}
+		log.FromContext(ctx).Info("Removed deleted component from Endpoint backends", "endpoint", ep.Name)
+	}
+	return nil
 }
 
 // listComponentsForEndpoint maps an Endpoint to the Components in its backendRefs.

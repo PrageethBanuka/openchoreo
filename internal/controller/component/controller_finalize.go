@@ -77,6 +77,13 @@ func (r *Reconciler) finalize(ctx context.Context, old, comp *openchoreov1alpha1
 		return controller.UpdateStatusConditionsAndReturn(ctx, r.Client, old, comp)
 	}
 
+	// The component no longer carries traffic: remove it from the Endpoints'
+	// backends so they keep serving through the rest.
+	if err := r.pruneFromEndpoints(ctx, comp); err != nil {
+		logger.Error(err, "Failed to remove component from Endpoints")
+		return ctrl.Result{}, err
+	}
+
 	// Delete all owned resources in a single reconcile
 	hasReleases, err := r.hasOwnedComponentReleases(ctx, comp)
 	if err != nil {
