@@ -50,6 +50,11 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=workflowruns,verbs=list;delete
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=deploymentpipelines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpoints,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointtypes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=clusterendpointtypes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleasebindings,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop
@@ -112,6 +117,13 @@ func (r *Reconciler) reconcileWithComponentType(ctx context.Context, comp *openc
 		}
 	}()
 
+	// Keep the reverse index of Endpoints routing here current, whatever the
+	// outcome of the rest of the reconcile.
+	if err := r.updateEndpointIndex(ctx, comp); err != nil {
+		logger.Error(err, "Failed to update Endpoint index")
+		return ctrl.Result{}, err
+	}
+
 	// Validate and fetch ComponentType
 	ct, err := r.validateAndFetchComponentType(ctx, comp)
 	if err != nil {
@@ -140,6 +152,12 @@ func (r *Reconciler) reconcileWithComponentType(ctx context.Context, comp *openc
 	if workload == nil {
 		// Validation error, condition already set
 		return ctrl.Result{}, nil
+	}
+
+	// Create Endpoints for workload endpoints that ask to be served through one
+	if err := r.reconcileExposedEndpoints(ctx, comp, workload); err != nil {
+		logger.Error(err, "Failed to reconcile exposed Endpoints")
+		return ctrl.Result{}, err
 	}
 
 	// Validate traits
@@ -885,6 +903,10 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.listComponentsForProject)).
 		Watches(&openchoreov1alpha1.DeploymentPipeline{},
 			handler.EnqueueRequestsFromMapFunc(r.listComponentsForDeploymentPipeline)).
+		Watches(&openchoreov1alpha1.Endpoint{},
+			handler.EnqueueRequestsFromMapFunc(r.listComponentsForEndpoint)).
+		Watches(&openchoreov1alpha1.EndpointReleaseBinding{},
+			handler.EnqueueRequestsFromMapFunc(r.listComponentsForEndpointReleaseBinding)).
 		Named("component").
 		Complete(r)
 }

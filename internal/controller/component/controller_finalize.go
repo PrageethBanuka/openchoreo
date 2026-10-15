@@ -22,6 +22,10 @@ import (
 const (
 	// ComponentFinalizer is the finalizer that ensures owned resources are deleted before Component
 	ComponentFinalizer = "openchoreo.dev/component-cleanup"
+
+	// stillRoutedRequeue is how often a held deletion re-checks Endpoint traffic.
+	// Endpoint and binding changes also trigger a reconcile through the watches.
+	stillRoutedRequeue = 10 * time.Second
 )
 
 // ensureFinalizer ensures that the finalizer is added to the Component.
@@ -50,6 +54,25 @@ func (r *Reconciler) finalize(ctx context.Context, old, comp *openchoreov1alpha1
 
 	// Mark the component condition as finalizing and return so that the component will indicate that it is being finalized.
 	// The actual finalization will be done in the next reconcile loop triggered by the status update.
+	if meta.SetStatusCondition(&comp.Status.Conditions, NewComponentFinalizingCondition(comp.Generation)) {
+		return controller.UpdateStatusConditionsAndReturn(ctx, r.Client, old, comp)
+	}
+
+	// Guard, don't cascade: while an Endpoint still sends this component traffic
+	// in any environment, deleting it would break a live route. Hold deletion
+	// and delete nothing until its weight is 0 everywhere.
+	routedMsg, err := r.stillRouted(ctx, comp)
+	if err != nil {
+		logger.Error(err, "Failed to check Endpoint traffic")
+		return ctrl.Result{}, err
+	}
+	if routedMsg != "" {
+		logger.Info("Holding deletion: component still routed by an Endpoint", "detail", routedMsg)
+		if meta.SetStatusCondition(&comp.Status.Conditions, NewComponentStillRoutedCondition(comp.Generation, routedMsg)) {
+			return controller.UpdateStatusConditionsAndRequeueAfter(ctx, r.Client, old, comp, stillRoutedRequeue)
+		}
+		return ctrl.Result{RequeueAfter: stillRoutedRequeue}, nil
+	}
 	if meta.SetStatusCondition(&comp.Status.Conditions, NewComponentFinalizingCondition(comp.Generation)) {
 		return controller.UpdateStatusConditionsAndReturn(ctx, r.Client, old, comp)
 	}

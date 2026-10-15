@@ -153,3 +153,35 @@ func ComponentEndpointRefs(usages []EndpointUsage) []openchoreov1alpha1.Componen
 	}
 	return refs
 }
+
+// ExposedEndpointName returns the name of the Endpoint a Workload endpoint is
+// served through: its endpointName, or <component>-<endpoint> by default.
+func ExposedEndpointName(componentName, endpointKey string, ep openchoreov1alpha1.WorkloadEndpoint) string {
+	if ep.EndpointName != "" {
+		return ep.EndpointName
+	}
+	return componentName + "-" + endpointKey
+}
+
+// EndpointTypeRefEqual compares two EndpointTypeRefs, treating an empty kind as
+// EndpointType like the CRD default does.
+func EndpointTypeRefEqual(a, b openchoreov1alpha1.EndpointTypeRef) bool {
+	kind := func(k openchoreov1alpha1.EndpointTypeRefKind) openchoreov1alpha1.EndpointTypeRefKind {
+		if k == "" {
+			return openchoreov1alpha1.EndpointTypeRefKindEndpointType
+		}
+		return k
+	}
+	return kind(a.Kind) == kind(b.Kind) && a.Name == b.Name
+}
+
+// HasEndpointBackend reports whether the Endpoint routes to the given
+// component's workload endpoint.
+func HasEndpointBackend(ep *openchoreov1alpha1.Endpoint, componentName, endpointKey string) bool {
+	for _, ref := range ep.Spec.BackendRefs {
+		if ref.ComponentName == componentName && ref.Endpoint == endpointKey {
+			return true
+		}
+	}
+	return false
+}

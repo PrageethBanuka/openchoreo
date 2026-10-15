@@ -19,6 +19,10 @@ const (
 
 	// ConditionFinalizing indicates that the Component is being finalized (deleted).
 	ConditionFinalizing controller.ConditionType = "Finalizing"
+
+	// ConditionEndpointsExposed reports whether the Workload endpoints that name an
+	// EndpointType are served through their Endpoints. Absent when none do.
+	ConditionEndpointsExposed controller.ConditionType = "EndpointsExposed"
 )
 
 // Constants for condition reasons
@@ -60,7 +64,34 @@ const (
 
 	// ReasonFinalizing indicates the Component is being finalized
 	ReasonFinalizing controller.ConditionReason = "Finalizing"
+
+	// ReasonStillRouted indicates deletion is held because an Endpoint still sends
+	// traffic to the Component in some environment.
+	ReasonStillRouted controller.ConditionReason = "StillRouted"
+
+	// Endpoint exposure (EndpointsExposed condition)
+
+	// ReasonEndpointsExposed indicates every exposed workload endpoint has its Endpoint
+	ReasonEndpointsExposed controller.ConditionReason = "EndpointsExposed"
+	// ReasonExposeConflict indicates the named Endpoint exists but doesn't route to this component
+	ReasonExposeConflict controller.ConditionReason = "ExposeConflict"
+	// ReasonEndpointTypeMismatch indicates the Workload names a different type than the Endpoint has
+	ReasonEndpointTypeMismatch controller.ConditionReason = "TypeMismatch"
+	// ReasonEndpointTypeNotFound indicates the named EndpointType or ClusterEndpointType doesn't exist
+	ReasonEndpointTypeNotFound controller.ConditionReason = "EndpointTypeNotFound"
 )
+
+// NewComponentStillRoutedCondition creates a condition indicating deletion is
+// held until no Endpoint sends traffic to the Component.
+func NewComponentStillRoutedCondition(generation int64, message string) metav1.Condition {
+	return controller.NewCondition(
+		ConditionFinalizing,
+		metav1.ConditionTrue,
+		ReasonStillRouted,
+		message,
+		generation,
+	)
+}
 
 // NewComponentFinalizingCondition creates a condition indicating the Component is being finalized.
 func NewComponentFinalizingCondition(generation int64) metav1.Condition {
