@@ -93,7 +93,7 @@ func networkPolicyProviderFromDataPlane(dp *controller.DataPlaneResult) networkp
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=renderedreleases,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=secretreferences,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpoints,verbs=get;list;watch
-// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleasebindings,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleasebindings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop
@@ -570,6 +570,10 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, releaseBinding *openc
 	// Gateway routes for workload endpoints claimed by an Endpoint are served by
 	// the Endpoint's route in this environment, so the component's own routes
 	// for those (endpoint, visibility) slots are not rendered.
+	if err := r.ensureExposedEndpointBindings(ctx, releaseBinding, snapshotWorkload); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to route exposed endpoints: %w", err)
+	}
+
 	endpointClaims, err := r.claimedEndpoints(ctx, releaseBinding)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to resolve endpoint claims: %w", err)
@@ -1482,6 +1486,13 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&openchoreov1alpha1.EndpointReleaseBinding{},
 			r.endpointClaimHandler(),
 			builder.WithPredicates(endpointClaimChangedPredicate()),
+		).
+		// An Endpoint created from (or first released for) one of this
+		// component's workload endpoints is routed where the component is deployed.
+		Watches(
+			&openchoreov1alpha1.Endpoint{},
+			handler.EnqueueRequestsFromMapFunc(r.findReleaseBindingsForEndpoint),
+			builder.WithPredicates(endpointLatestReleaseChangedPredicate()),
 		).
 		Named("releasebinding").
 		Complete(r)
