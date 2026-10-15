@@ -153,6 +153,45 @@ webhooks:
     service:
       name: {{ .Values.controllerManager.name }}-webhook-service
       namespace: '{{ .Release.Namespace }}'
+      path: /validate-openchoreo-dev-v1alpha1-endpoint
+  failurePolicy: Fail
+  name: vendpoint-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - openchoreo.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - endpoints
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ .Values.controllerManager.name }}-webhook-service
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-openchoreo-dev-v1alpha1-endpointreleasebinding
+  failurePolicy: Fail
+  name: vendpointreleasebinding-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - openchoreo.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    resources:
+    - endpointreleasebindings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ .Values.controllerManager.name }}-webhook-service
+      namespace: '{{ .Release.Namespace }}'
       path: /validate-openchoreo-dev-v1alpha1-resourcerelease
   failurePolicy: Fail
   name: vresourcerelease-v1alpha1.kb.io

@@ -81,6 +81,8 @@ import (
 	componentwebhook "github.com/openchoreo/openchoreo/internal/webhook/component"
 	componentreleasewebhook "github.com/openchoreo/openchoreo/internal/webhook/componentrelease"
 	componenttypewebhook "github.com/openchoreo/openchoreo/internal/webhook/componenttype"
+	endpointwebhook "github.com/openchoreo/openchoreo/internal/webhook/endpoint"
+	endpointreleasebindingwebhook "github.com/openchoreo/openchoreo/internal/webhook/endpointreleasebinding"
 	projectwebhook "github.com/openchoreo/openchoreo/internal/webhook/project"
 	releasebindingwebhook "github.com/openchoreo/openchoreo/internal/webhook/releasebinding"
 	resourcereleasewebhook "github.com/openchoreo/openchoreo/internal/webhook/resourcerelease"
@@ -527,6 +529,8 @@ func main() {
 			{"ClusterTrait", clustertraitwebhook.SetupClusterTraitWebhookWithManager},
 			{"ComponentRelease", componentreleasewebhook.SetupComponentReleaseWebhookWithManager},
 			{"ReleaseBinding", releasebindingwebhook.SetupReleaseBindingWebhookWithManager},
+			{"Endpoint", endpointwebhook.SetupEndpointWebhookWithManager},
+			{"EndpointReleaseBinding", endpointreleasebindingwebhook.SetupEndpointReleaseBindingWebhookWithManager},
 			{"ResourceType", resourcetypewebhook.SetupResourceTypeWebhookWithManager},
 			{"ClusterResourceType", clusterresourcetypewebhook.SetupClusterResourceTypeWebhookWithManager},
 			{"ResourceRelease", resourcereleasewebhook.SetupResourceReleaseWebhookWithManager},
