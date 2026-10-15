@@ -18,6 +18,10 @@ import (
 	projectsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/project"
 )
 
+// createdFromPortal is the created-from annotation value for Endpoints a
+// person creates through the API (portal, occ, MCP).
+const createdFromPortal = "portal"
+
 var endpointTypeMeta = metav1.TypeMeta{
 	APIVersion: openchoreov1alpha1.GroupVersion.String(),
 	Kind:       "Endpoint",
@@ -73,6 +77,12 @@ func (s *endpointService) CreateEndpoint(ctx context.Context, namespaceName stri
 		ep.Labels = make(map[string]string)
 	}
 	ep.Labels[labels.LabelKeyProjectName] = ep.Spec.Owner.ProjectName
+	if ep.Annotations == nil {
+		ep.Annotations = make(map[string]string)
+	}
+	if ep.Annotations[labels.AnnotationKeyEndpointCreatedFrom] == "" {
+		ep.Annotations[labels.AnnotationKeyEndpointCreatedFrom] = createdFromPortal
+	}
 
 	if err := s.k8sClient.Create(ctx, ep); err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -117,10 +127,23 @@ func (s *endpointService) UpdateEndpoint(ctx context.Context, namespaceName stri
 		return nil, &services.ValidationError{Msg: "spec.owner.projectName is immutable"}
 	}
 
+	// An update that leaves reclaimPolicy out keeps the current one rather than
+	// falling back to the CRD default.
+	if ep.Spec.ReclaimPolicy == "" {
+		ep.Spec.ReclaimPolicy = existing.Spec.ReclaimPolicy
+	}
+
 	// Only apply user-mutable fields to the existing object, preserving server-managed fields
+	createdFrom := existing.Annotations[labels.AnnotationKeyEndpointCreatedFrom]
 	existing.Spec = ep.Spec
 	existing.Labels = ep.Labels
 	existing.Annotations = ep.Annotations
+	if createdFrom != "" {
+		if existing.Annotations == nil {
+			existing.Annotations = make(map[string]string)
+		}
+		existing.Annotations[labels.AnnotationKeyEndpointCreatedFrom] = createdFrom
+	}
 
 	// Preserve special labels
 	if existing.Labels == nil {

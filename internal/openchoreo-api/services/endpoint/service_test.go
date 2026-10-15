@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/labels"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
 	projectsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/project"
@@ -43,6 +44,7 @@ func TestCreateEndpoint(t *testing.T) {
 		assert.Equal(t, endpointTypeMeta, result.TypeMeta)
 		assert.Equal(t, testNamespace, result.Namespace)
 		assert.Equal(t, testProject, result.Labels[labels.LabelKeyProjectName])
+		assert.Equal(t, "portal", result.Annotations[labels.AnnotationKeyEndpointCreatedFrom])
 	})
 
 	t.Run("nil input", func(t *testing.T) {
@@ -80,6 +82,19 @@ func TestUpdateEndpoint(t *testing.T) {
 		assert.Equal(t, int32(50), *result.Spec.BackendRefs[0].Weight)
 		assert.Equal(t, int32(50), *result.Spec.BackendRefs[1].Weight)
 		assert.Equal(t, testProject, result.Labels[labels.LabelKeyProjectName], "project label must survive an update that drops labels")
+	})
+
+	t.Run("keeps created-from and an omitted reclaimPolicy", func(t *testing.T) {
+		existing := testutil.NewEndpoint(testNamespace, testProject, "payments-api")
+		existing.Annotations = map[string]string{labels.AnnotationKeyEndpointCreatedFrom: "workload/payments-v1/http"}
+		existing.Spec.ReclaimPolicy = openchoreov1alpha1.EndpointReclaimPolicyRetain
+		svc := newService(t, existing)
+
+		update := testutil.NewEndpoint(testNamespace, testProject, "payments-api")
+		result, err := svc.UpdateEndpoint(ctx, testNamespace, update)
+		require.NoError(t, err)
+		assert.Equal(t, "workload/payments-v1/http", result.Annotations[labels.AnnotationKeyEndpointCreatedFrom])
+		assert.Equal(t, openchoreov1alpha1.EndpointReclaimPolicyRetain, result.Spec.ReclaimPolicy)
 	})
 
 	t.Run("project is immutable", func(t *testing.T) {

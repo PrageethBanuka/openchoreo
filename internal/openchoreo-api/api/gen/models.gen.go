@@ -210,6 +210,12 @@ const (
 	EndpointServingClaimVisibilitiesProject   EndpointServingClaimVisibilities = "project"
 )
 
+// Defines values for EndpointSpecReclaimPolicy.
+const (
+	EndpointReclaimPolicyDelete EndpointSpecReclaimPolicy = "Delete"
+	EndpointReclaimPolicyRetain EndpointSpecReclaimPolicy = "Retain"
+)
+
 // Defines values for EndpointTypeRefKind.
 const (
 	EndpointTypeRefKindClusterEndpointType EndpointTypeRefKind = "ClusterEndpointType"
@@ -1433,6 +1439,21 @@ type Component struct {
 	Status *ComponentStatus `json:"status,omitempty"`
 }
 
+// ComponentEndpointRef An Endpoint that routes to a component's workload endpoint.
+type ComponentEndpointRef struct {
+	// Endpoint Workload endpoint of the component the Endpoint routes to
+	Endpoint string `json:"endpoint"`
+
+	// Environments Weight of this component in the release pinned in each environment where the Endpoint is bound
+	Environments *[]struct {
+		Name   string `json:"name"`
+		Weight int32  `json:"weight"`
+	} `json:"environments,omitempty"`
+
+	// Name Endpoint name
+	Name string `json:"name"`
+}
+
 // ComponentList Paginated list of components
 type ComponentList struct {
 	Items []Component `json:"items"`
@@ -1541,6 +1562,10 @@ type ComponentSpecComponentTypeKind string
 type ComponentStatus struct {
 	// Conditions Current state conditions of the Component
 	Conditions *[]Condition `json:"conditions,omitempty"`
+
+	// Endpoints Reverse index of the Endpoints that route to this component, with the weight each gives it
+	// in the release pinned per environment. Derived by the controller; the component does not own them.
+	Endpoints *[]ComponentEndpointRef `json:"endpoints,omitempty"`
 
 	// LatestRelease Information about the latest ComponentRelease created for this component
 	LatestRelease *struct {
@@ -2250,8 +2275,8 @@ type EndpointServingClaimVisibilities string
 
 // EndpointSpec Desired state of an Endpoint. spec.owner and spec.type are immutable after creation.
 type EndpointSpec struct {
-	// BackendRefs Component workload endpoints receiving traffic, with relative weights.
-	BackendRefs []EndpointBackendRef `json:"backendRefs"`
+	// BackendRefs Component workload endpoints receiving traffic, with relative weights. May be empty; see reclaimPolicy.
+	BackendRefs *[]EndpointBackendRef `json:"backendRefs,omitempty"`
 
 	// Owner Identifies the project that owns this Endpoint.
 	Owner struct {
@@ -2262,9 +2287,17 @@ type EndpointSpec struct {
 	// Parameters Values for the parameter schema declared on the referenced (Cluster)EndpointType. Validated by the controller.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
 
+	// ReclaimPolicy What happens when the Endpoint has no backends left. Delete removes it and hands its URL back;
+	// Retain keeps it as Orphaned, without routes, until a backend is added.
+	ReclaimPolicy *EndpointSpecReclaimPolicy `json:"reclaimPolicy,omitempty"`
+
 	// Type Reference to an EndpointType or ClusterEndpointType template.
 	Type EndpointTypeRef `json:"type"`
 }
+
+// EndpointSpecReclaimPolicy What happens when the Endpoint has no backends left. Delete removes it and hands its URL back;
+// Retain keeps it as Orphaned, without routes, until a backend is added.
+type EndpointSpecReclaimPolicy string
 
 // EndpointStatus Observed state of an Endpoint.
 type EndpointStatus struct {
@@ -4922,6 +4955,13 @@ type WorkloadEndpoint struct {
 
 	// DisplayName Human-readable name for the endpoint
 	DisplayName *string `json:"displayName,omitempty"`
+
+	// EndpointName Name of the Endpoint that serves this endpoint when endpointType is set.
+	// Defaults to <component>-<endpoint>. The Endpoint is created if missing and is not owned by the component.
+	EndpointName *string `json:"endpointName,omitempty"`
+
+	// EndpointType Reference to an EndpointType or ClusterEndpointType template.
+	EndpointType *EndpointTypeRef `json:"endpointType,omitempty"`
 
 	// Port Port exposed by the endpoint
 	Port int `json:"port"`

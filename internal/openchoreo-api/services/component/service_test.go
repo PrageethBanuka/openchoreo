@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -476,6 +477,55 @@ func TestDeleteComponent(t *testing.T) {
 		svc := newService(t)
 		err := svc.DeleteComponent(ctx, testNamespace, "nonexistent")
 		require.ErrorIs(t, err, ErrComponentNotFound)
+	})
+
+	// An Endpoint that sends the component traffic in an environment, with
+	// another backend to move it to, blocks the delete until its weight is 0.
+	routedObjects := func(weight int32) []client.Object {
+		other := "other-component"
+		refs := func(w int32) []openchoreov1alpha1.EndpointBackendRef {
+			return []openchoreov1alpha1.EndpointBackendRef{
+				{ComponentName: testComponentName, Endpoint: "http", Weight: ptr.To(w)},
+				{ComponentName: other, Endpoint: "http", Weight: ptr.To(100 - w)},
+			}
+		}
+		return []client.Object{
+			testComponent(),
+			&openchoreov1alpha1.Endpoint{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNamespace},
+				Spec: openchoreov1alpha1.EndpointSpec{
+					Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: testProjectName},
+					BackendRefs: refs(weight),
+				},
+			},
+			&openchoreov1alpha1.EndpointRelease{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments-api-rel", Namespace: testNamespace},
+				Spec:       openchoreov1alpha1.EndpointReleaseSpec{BackendRefs: refs(weight)},
+			},
+			&openchoreov1alpha1.EndpointReleaseBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments-api-production", Namespace: testNamespace},
+				Spec: openchoreov1alpha1.EndpointReleaseBindingSpec{
+					Owner:           openchoreov1alpha1.EndpointReleaseBindingOwner{ProjectName: testProjectName, EndpointName: "payments-api"},
+					Environment:     "production",
+					EndpointRelease: "payments-api-rel",
+				},
+			},
+		}
+	}
+
+	t.Run("refused while still routed", func(t *testing.T) {
+		svc := newService(t, routedObjects(10)...)
+		err := svc.DeleteComponent(ctx, testNamespace, testComponentName)
+		require.ErrorIs(t, err, ErrComponentStillRouted)
+		assert.Contains(t, err.Error(), "payments-api in production (weight 10)")
+
+		_, err = svc.GetComponent(ctx, testNamespace, testComponentName)
+		require.NoError(t, err, "the component must still exist")
+	})
+
+	t.Run("allowed at weight 0", func(t *testing.T) {
+		svc := newService(t, routedObjects(0)...)
+		require.NoError(t, svc.DeleteComponent(ctx, testNamespace, testComponentName))
 	})
 }
 

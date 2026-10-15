@@ -16,6 +16,7 @@ import (
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/componentrelease"
+	"github.com/openchoreo/openchoreo/internal/controller"
 	"github.com/openchoreo/openchoreo/internal/labels"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
 	projectsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/project"
@@ -234,8 +235,29 @@ func (s *componentService) DeleteComponent(ctx context.Context, namespaceName, c
 	s.logger.Debug("Deleting component", "namespace", namespaceName, "component", componentName)
 
 	component := &openchoreov1alpha1.Component{}
-	component.Name = componentName
-	component.Namespace = namespaceName
+	if err := s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: componentName}, component); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ErrComponentNotFound
+		}
+		return fmt.Errorf("failed to get component: %w", err)
+	}
+
+	// Guard, don't cascade: refuse while an Endpoint still sends this component
+	// traffic that could be moved to its other backends first. The Component
+	// finalizer holds the same line for deletes that bypass the API.
+	usages, err := controller.ComponentEndpointUsage(ctx, s.k8sClient, namespaceName, component.Spec.Owner.ProjectName, componentName)
+	if err != nil {
+		return fmt.Errorf("failed to check endpoint traffic: %w", err)
+	}
+	if routed := controller.RoutedEndpointUsage(usages); len(routed) > 0 {
+		parts := make([]string, 0, len(routed))
+		for _, u := range routed {
+			parts = append(parts, fmt.Sprintf("%s in %s (weight %d)", u.Endpoint, u.Environment, u.Weight))
+		}
+		return &StillRoutedError{Message: fmt.Sprintf(
+			"component %q still receives traffic through %s; move its weight to 0 and roll out before deleting",
+			componentName, strings.Join(parts, ", "))}
+	}
 
 	if err := s.k8sClient.Delete(ctx, component); err != nil {
 		if apierrors.IsNotFound(err) {

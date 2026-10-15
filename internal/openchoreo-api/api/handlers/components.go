@@ -281,6 +281,9 @@ func (h *Handler) DeleteComponent(
 		if errors.Is(err, componentsvc.ErrComponentNotFound) {
 			return gen.DeleteComponent404JSONResponse{NotFoundJSONResponse: notFound("Component")}, nil
 		}
+		if errors.Is(err, componentsvc.ErrComponentStillRouted) {
+			return gen.DeleteComponent409JSONResponse{ConflictJSONResponse: conflict(err.Error())}, nil
+		}
 		h.logger.Error("Failed to delete component", "error", err)
 		return gen.DeleteComponent500JSONResponse{InternalErrorJSONResponse: internalError()}, nil
 	}

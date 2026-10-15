@@ -74,7 +74,7 @@ func newEndpointBody(name string, weights ...int32) gen.Endpoint {
 		Metadata: gen.ObjectMeta{Name: name},
 		Spec: &gen.EndpointSpec{
 			Type:        gen.EndpointTypeRef{Kind: ptr.To(gen.EndpointTypeRefKindClusterEndpointType), Name: "http-weighted"},
-			BackendRefs: refs,
+			BackendRefs: &refs,
 		},
 	}
 	body.Spec.Owner.ProjectName = testEPProject
@@ -142,8 +142,9 @@ func TestCreateEndpointHandler(t *testing.T) {
 		require.True(t, ok, "expected 201 response, got %T", resp)
 		assert.Equal(t, "payments-api", typed.Metadata.Name)
 		require.NotNil(t, typed.Spec)
-		require.Len(t, typed.Spec.BackendRefs, 2)
-		assert.Equal(t, int32(10), *typed.Spec.BackendRefs[1].Weight)
+		require.NotNil(t, typed.Spec.BackendRefs)
+		require.Len(t, *typed.Spec.BackendRefs, 2)
+		assert.Equal(t, int32(10), *(*typed.Spec.BackendRefs)[1].Weight)
 	})
 
 	t.Run("nil body returns 400", func(t *testing.T) {
@@ -217,7 +218,8 @@ func TestUpdateEndpointHandler(t *testing.T) {
 		typed, ok := resp.(gen.UpdateEndpoint200JSONResponse)
 		require.True(t, ok, "expected 200 response, got %T", resp)
 		assert.Equal(t, "payments-api", typed.Metadata.Name, "the path name wins over the body's")
-		assert.Equal(t, int32(50), *typed.Spec.BackendRefs[0].Weight)
+		require.NotNil(t, typed.Spec.BackendRefs)
+		assert.Equal(t, int32(50), *(*typed.Spec.BackendRefs)[0].Weight)
 	})
 
 	t.Run("project change returns 400", func(t *testing.T) {
