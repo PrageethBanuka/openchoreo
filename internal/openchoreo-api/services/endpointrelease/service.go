@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -91,4 +93,47 @@ func (s *endpointReleaseService) GetEndpointRelease(ctx context.Context, namespa
 
 	er.TypeMeta = endpointReleaseTypeMeta
 	return er, nil
+}
+
+func (s *endpointReleaseService) DeleteEndpointRelease(ctx context.Context, namespaceName, endpointReleaseName string) error {
+	s.logger.Debug("Deleting endpoint release", "namespace", namespaceName, "endpointRelease", endpointReleaseName)
+
+	er, err := s.GetEndpointRelease(ctx, namespaceName, endpointReleaseName)
+	if err != nil {
+		return err
+	}
+
+	var bindings openchoreov1alpha1.EndpointReleaseBindingList
+	if err := s.k8sClient.List(ctx, &bindings, client.InNamespace(namespaceName)); err != nil {
+		return fmt.Errorf("failed to list endpoint release bindings: %w", err)
+	}
+	var pinnedIn []string
+	for i := range bindings.Items {
+		b := &bindings.Items[i]
+		if b.Spec.Owner.EndpointName == er.Spec.Owner.EndpointName && b.Spec.EndpointRelease == er.Name {
+			pinnedIn = append(pinnedIn, b.Spec.Environment)
+		}
+	}
+	if len(pinnedIn) > 0 {
+		sort.Strings(pinnedIn)
+		return &InUseError{Message: fmt.Sprintf("endpoint release %q is pinned in %s; roll those environments to another release first",
+			er.Name, strings.Join(pinnedIn, ", "))}
+	}
+
+	ep := &openchoreov1alpha1.Endpoint{}
+	err = s.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: er.Spec.Owner.EndpointName}, ep)
+	if err != nil && client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to get endpoint: %w", err)
+	}
+	if err == nil && ep.Status.LatestRelease != nil && ep.Status.LatestRelease.Name == er.Name {
+		return &InUseError{Message: fmt.Sprintf("endpoint release %q is the latest release of %q", er.Name, ep.Name)}
+	}
+
+	if err := s.k8sClient.Delete(ctx, er); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return ErrEndpointReleaseNotFound
+		}
+		return fmt.Errorf("failed to delete endpoint release: %w", err)
+	}
+	return nil
 }

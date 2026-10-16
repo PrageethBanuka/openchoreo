@@ -68,3 +68,24 @@ func (s *endpointReleaseServiceWithAuthz) GetEndpointRelease(ctx context.Context
 	}
 	return er, nil
 }
+
+// DeleteEndpointRelease prunes the Endpoint's release history, so it is
+// authorized as an update of the owning Endpoint.
+func (s *endpointReleaseServiceWithAuthz) DeleteEndpointRelease(ctx context.Context, namespaceName, endpointReleaseName string) error {
+	er, err := s.internal.GetEndpointRelease(ctx, namespaceName, endpointReleaseName)
+	if err != nil {
+		return err
+	}
+	if err := s.authz.Check(ctx, services.CheckRequest{
+		Action:       authz.ActionUpdateEndpoint,
+		ResourceType: "endpoint",
+		ResourceID:   er.Spec.Owner.EndpointName,
+		Hierarchy: authz.ResourceHierarchy{
+			Namespace: namespaceName,
+			Project:   er.Spec.Owner.ProjectName,
+		},
+	}); err != nil {
+		return err
+	}
+	return s.internal.DeleteEndpointRelease(ctx, namespaceName, endpointReleaseName)
+}

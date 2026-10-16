@@ -9,7 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services/testutil"
 )
@@ -52,4 +54,49 @@ func TestGetEndpointRelease(t *testing.T) {
 
 	_, err = svc.GetEndpointRelease(ctx, testNamespace, "missing")
 	require.ErrorIs(t, err, ErrEndpointReleaseNotFound)
+}
+
+func TestDeleteEndpointRelease(t *testing.T) {
+	ctx := context.Background()
+	newSvc := func() Service {
+		ep := testutil.NewEndpoint(testNamespace, testProject, "payments-api")
+		ep.Status.LatestRelease = &openchoreov1alpha1.LatestEndpointRelease{Name: "payments-api-latest", Hash: "h"}
+		pinning := &openchoreov1alpha1.EndpointReleaseBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments-api-production", Namespace: testNamespace},
+			Spec: openchoreov1alpha1.EndpointReleaseBindingSpec{
+				Owner:           openchoreov1alpha1.EndpointReleaseBindingOwner{ProjectName: testProject, EndpointName: "payments-api"},
+				Environment:     "production",
+				EndpointRelease: "payments-api-pinned",
+			},
+		}
+		return NewService(testutil.NewFakeClient(
+			ep, pinning,
+			testutil.NewEndpointRelease(testNamespace, testProject, "payments-api", "payments-api-old"),
+			testutil.NewEndpointRelease(testNamespace, testProject, "payments-api", "payments-api-pinned"),
+			testutil.NewEndpointRelease(testNamespace, testProject, "payments-api", "payments-api-latest"),
+		), testutil.TestLogger())
+	}
+
+	t.Run("deletes an unused release", func(t *testing.T) {
+		svc := newSvc()
+		require.NoError(t, svc.DeleteEndpointRelease(ctx, testNamespace, "payments-api-old"))
+		_, err := svc.GetEndpointRelease(ctx, testNamespace, "payments-api-old")
+		require.ErrorIs(t, err, ErrEndpointReleaseNotFound)
+	})
+
+	t.Run("refuses a release an environment pins", func(t *testing.T) {
+		err := newSvc().DeleteEndpointRelease(ctx, testNamespace, "payments-api-pinned")
+		require.ErrorIs(t, err, ErrEndpointReleaseInUse)
+		assert.Contains(t, err.Error(), "pinned in production")
+	})
+
+	t.Run("refuses the latest release", func(t *testing.T) {
+		err := newSvc().DeleteEndpointRelease(ctx, testNamespace, "payments-api-latest")
+		require.ErrorIs(t, err, ErrEndpointReleaseInUse)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		err := newSvc().DeleteEndpointRelease(ctx, testNamespace, "missing")
+		require.ErrorIs(t, err, ErrEndpointReleaseNotFound)
+	})
 }

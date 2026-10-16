@@ -18,7 +18,7 @@ import (
 func TestGetOperations(t *testing.T) {
 	ops := GetOperations()
 
-	const want = 120
+	const want = 121
 	if len(ops) != want {
 		t.Fatalf("len(GetOperations()) = %d, want %d", len(ops), want)
 	}
@@ -52,8 +52,8 @@ func TestGetOperations(t *testing.T) {
 		seen[op.ID] = true
 	}
 
-	if mgmt != 108 || authz != 12 {
-		t.Errorf("category split = %d management / %d authorization, want 108/12", mgmt, authz)
+	if mgmt != 109 || authz != 12 {
+		t.Errorf("category split = %d management / %d authorization, want 109/12", mgmt, authz)
 	}
 	if notInSpec != 2 {
 		t.Errorf("NotInOpenAPISpec count = %d, want 2 (Exec, Wirelogs)", notInSpec)

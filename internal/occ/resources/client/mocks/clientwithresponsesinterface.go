@@ -7232,6 +7232,81 @@ func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseBindingWithRespo
 	return _c
 }
 
+// DeleteEndpointReleaseWithResponse provides a mock function with given fields: ctx, namespaceName, endpointReleaseName, reqEditors
+func (_m *MockClientWithResponsesInterface) DeleteEndpointReleaseWithResponse(ctx context.Context, namespaceName string, endpointReleaseName string, reqEditors ...gen.RequestEditorFn) (*gen.DeleteEndpointReleaseResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, namespaceName, endpointReleaseName)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEndpointReleaseWithResponse")
+	}
+
+	var r0 *gen.DeleteEndpointReleaseResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.DeleteEndpointReleaseResp, error)); ok {
+		return rf(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, ...gen.RequestEditorFn) *gen.DeleteEndpointReleaseResp); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.DeleteEndpointReleaseResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpointReleaseWithResponse'
+type MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call struct {
+	*mock.Call
+}
+
+// DeleteEndpointReleaseWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseName string
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) DeleteEndpointReleaseWithResponse(ctx interface{}, namespaceName interface{}, endpointReleaseName interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call {
+	return &MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call{Call: _e.mock.On("DeleteEndpointReleaseWithResponse",
+		append([]interface{}{ctx, namespaceName, endpointReleaseName}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseName string, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), args[1].(string), args[2].(string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call) Return(_a0 *gen.DeleteEndpointReleaseResp, _a1 error) *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call) RunAndReturn(run func(context.Context, string, string, ...gen.RequestEditorFn) (*gen.DeleteEndpointReleaseResp, error)) *MockClientWithResponsesInterface_DeleteEndpointReleaseWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteEndpointWithResponse provides a mock function with given fields: ctx, namespaceName, endpointName, reqEditors
 func (_m *MockClientWithResponsesInterface) DeleteEndpointWithResponse(ctx context.Context, namespaceName string, endpointName string, reqEditors ...gen.RequestEditorFn) (*gen.DeleteEndpointResp, error) {
 	_va := make([]interface{}, len(reqEditors))

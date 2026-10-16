@@ -79,3 +79,28 @@ func (h *Handler) GetEndpointRelease(
 
 	return gen.GetEndpointRelease200JSONResponse(genER), nil
 }
+
+// DeleteEndpointRelease deletes an old endpoint release that no environment uses.
+func (h *Handler) DeleteEndpointRelease(
+	ctx context.Context,
+	request gen.DeleteEndpointReleaseRequestObject,
+) (gen.DeleteEndpointReleaseResponseObject, error) {
+	h.logger.Info("DeleteEndpointRelease called", "namespaceName", request.NamespaceName, "endpointReleaseName", request.EndpointReleaseName)
+
+	err := h.services.EndpointReleaseService.DeleteEndpointRelease(ctx, request.NamespaceName, request.EndpointReleaseName)
+	if err != nil {
+		if errors.Is(err, services.ErrForbidden) {
+			return gen.DeleteEndpointRelease403JSONResponse{ForbiddenJSONResponse: forbidden()}, nil
+		}
+		if errors.Is(err, endpointreleasesvc.ErrEndpointReleaseNotFound) {
+			return gen.DeleteEndpointRelease404JSONResponse{NotFoundJSONResponse: notFound("EndpointRelease")}, nil
+		}
+		if errors.Is(err, endpointreleasesvc.ErrEndpointReleaseInUse) {
+			return gen.DeleteEndpointRelease409JSONResponse{ConflictJSONResponse: conflict(err.Error())}, nil
+		}
+		h.logger.Error("Failed to delete endpoint release", "error", err)
+		return gen.DeleteEndpointRelease500JSONResponse{InternalErrorJSONResponse: internalError()}, nil
+	}
+
+	return gen.DeleteEndpointRelease204Response{}, nil
+}

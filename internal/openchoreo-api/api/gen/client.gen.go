@@ -503,6 +503,9 @@ type ClientInterface interface {
 	// ListEndpointReleases request
 	ListEndpointReleases(ctx context.Context, namespaceName NamespaceNameParam, params *ListEndpointReleasesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DeleteEndpointRelease request
+	DeleteEndpointRelease(ctx context.Context, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetEndpointRelease request
 	GetEndpointRelease(ctx context.Context, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2751,6 +2754,18 @@ func (c *Client) GetEndpointReleaseBindingK8sResourceTree(ctx context.Context, n
 
 func (c *Client) ListEndpointReleases(ctx context.Context, namespaceName NamespaceNameParam, params *ListEndpointReleasesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListEndpointReleasesRequest(c.Server, namespaceName, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteEndpointRelease(ctx context.Context, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteEndpointReleaseRequest(c.Server, namespaceName, endpointReleaseName)
 	if err != nil {
 		return nil, err
 	}
@@ -10362,6 +10377,47 @@ func NewListEndpointReleasesRequest(server string, namespaceName NamespaceNamePa
 	return req, nil
 }
 
+// NewDeleteEndpointReleaseRequest generates requests for DeleteEndpointRelease
+func NewDeleteEndpointReleaseRequest(server string, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "namespaceName", runtime.ParamLocationPath, namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "endpointReleaseName", runtime.ParamLocationPath, endpointReleaseName)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/namespaces/%s/endpointreleases/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetEndpointReleaseRequest generates requests for GetEndpointRelease
 func NewGetEndpointReleaseRequest(server string, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam) (*http.Request, error) {
 	var err error
@@ -17422,6 +17478,9 @@ type ClientWithResponsesInterface interface {
 	// ListEndpointReleasesWithResponse request
 	ListEndpointReleasesWithResponse(ctx context.Context, namespaceName NamespaceNameParam, params *ListEndpointReleasesParams, reqEditors ...RequestEditorFn) (*ListEndpointReleasesResp, error)
 
+	// DeleteEndpointReleaseWithResponse request
+	DeleteEndpointReleaseWithResponse(ctx context.Context, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam, reqEditors ...RequestEditorFn) (*DeleteEndpointReleaseResp, error)
+
 	// GetEndpointReleaseWithResponse request
 	GetEndpointReleaseWithResponse(ctx context.Context, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam, reqEditors ...RequestEditorFn) (*GetEndpointReleaseResp, error)
 
@@ -20842,6 +20901,32 @@ func (r ListEndpointReleasesResp) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListEndpointReleasesResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteEndpointReleaseResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteEndpointReleaseResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteEndpointReleaseResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -25357,6 +25442,15 @@ func (c *ClientWithResponses) ListEndpointReleasesWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseListEndpointReleasesResp(rsp)
+}
+
+// DeleteEndpointReleaseWithResponse request returning *DeleteEndpointReleaseResp
+func (c *ClientWithResponses) DeleteEndpointReleaseWithResponse(ctx context.Context, namespaceName NamespaceNameParam, endpointReleaseName EndpointReleaseNameParam, reqEditors ...RequestEditorFn) (*DeleteEndpointReleaseResp, error) {
+	rsp, err := c.DeleteEndpointRelease(ctx, namespaceName, endpointReleaseName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteEndpointReleaseResp(rsp)
 }
 
 // GetEndpointReleaseWithResponse request returning *GetEndpointReleaseResp
@@ -33287,6 +33381,60 @@ func ParseListEndpointReleasesResp(rsp *http.Response) (*ListEndpointReleasesRes
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteEndpointReleaseResp parses an HTTP response from a DeleteEndpointReleaseWithResponse call
+func ParseDeleteEndpointReleaseResp(rsp *http.Response) (*DeleteEndpointReleaseResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteEndpointReleaseResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

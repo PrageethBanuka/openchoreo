@@ -25,6 +25,54 @@ func (_m *MockService) EXPECT() *MockService_Expecter {
 	return &MockService_Expecter{mock: &_m.Mock}
 }
 
+// DeleteEndpointRelease provides a mock function with given fields: ctx, namespaceName, endpointReleaseName
+func (_m *MockService) DeleteEndpointRelease(ctx context.Context, namespaceName string, endpointReleaseName string) error {
+	ret := _m.Called(ctx, namespaceName, endpointReleaseName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteEndpointRelease")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, namespaceName, endpointReleaseName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockService_DeleteEndpointRelease_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteEndpointRelease'
+type MockService_DeleteEndpointRelease_Call struct {
+	*mock.Call
+}
+
+// DeleteEndpointRelease is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespaceName string
+//   - endpointReleaseName string
+func (_e *MockService_Expecter) DeleteEndpointRelease(ctx interface{}, namespaceName interface{}, endpointReleaseName interface{}) *MockService_DeleteEndpointRelease_Call {
+	return &MockService_DeleteEndpointRelease_Call{Call: _e.mock.On("DeleteEndpointRelease", ctx, namespaceName, endpointReleaseName)}
+}
+
+func (_c *MockService_DeleteEndpointRelease_Call) Run(run func(ctx context.Context, namespaceName string, endpointReleaseName string)) *MockService_DeleteEndpointRelease_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockService_DeleteEndpointRelease_Call) Return(_a0 error) *MockService_DeleteEndpointRelease_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockService_DeleteEndpointRelease_Call) RunAndReturn(run func(context.Context, string, string) error) *MockService_DeleteEndpointRelease_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetEndpointRelease provides a mock function with given fields: ctx, namespaceName, endpointReleaseName
 func (_m *MockService) GetEndpointRelease(ctx context.Context, namespaceName string, endpointReleaseName string) (*v1alpha1.EndpointRelease, error) {
 	ret := _m.Called(ctx, namespaceName, endpointReleaseName)

@@ -15,4 +15,7 @@ import (
 type Service interface {
 	ListEndpointReleases(ctx context.Context, namespaceName, endpointName string, opts services.ListOptions) (*services.ListResult[openchoreov1alpha1.EndpointRelease], error)
 	GetEndpointRelease(ctx context.Context, namespaceName, endpointReleaseName string) (*openchoreov1alpha1.EndpointRelease, error)
+	// DeleteEndpointRelease deletes a release that no environment pins and
+	// that is not the Endpoint's latest release.
+	DeleteEndpointRelease(ctx context.Context, namespaceName, endpointReleaseName string) error
 }

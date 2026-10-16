@@ -243,6 +243,10 @@ func generatedOperationDefs() []audit.OperationDef {
 			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
 		},
 		{
+			ID: "DeleteEndpointRelease", Action: "delete_endpoint_release", ResourceType: "endpointrelease",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointReleaseName",
+		},
+		{
 			ID: "DeleteEndpointReleaseBinding", Action: "delete_endpoint_release_binding", ResourceType: "endpointreleasebinding",
 			Category: audit.CategoryManagement, RESTResourceParam: "endpointReleaseBindingName",
 		},

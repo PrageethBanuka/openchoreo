@@ -64,6 +64,7 @@ var apiResourceCategories = map[string]string{
 	"dataplanes":                              "CategoryManagement",
 	"endpoints":                               "CategoryManagement",
 	"endpointreleasebindings":                 "CategoryManagement",
+	"endpointreleases":                        "CategoryManagement",
 	"deploymentpipelines":                     "CategoryManagement",
 	"environments":                            "CategoryManagement",
 	"gitsecrets":                              "CategoryManagement",
