@@ -1,0 +1,153 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterEndpointType
+metadata:
+  name: mesh-gamma
+  annotations:
+    openchoreo.dev/description: >-
+      Routes in-cluster (east-west) calls to a component's Service through the
+      service mesh, using a Gateway API mesh (GAMMA) HTTPRoute whose parent is
+      that Service. Callers keep the URL they already use; the mesh splits it
+      across the Endpoint's backends by weight, after any header, cookie or
+      query rules, and can mirror a share to another backend. Works on Istio
+      (ambient with a waypoint, or sidecars), Cilium 1.16+ and Linkerd 2.14+;
+      the DataPlane names its mesh with the openchoreo.dev/service-mesh
+      annotation. Linkerd does not support mirroring.
+spec:
+  addressKind: Service
+  allowedBackendKinds:
+    - Component
+  # The shared traffic schema (samples/mesh-endpoint-types/traffic-schema.yaml).
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        rules:
+          type: array
+          default: []
+          maxItems: 15
+          items:
+            type: object
+            required: [name, matches, backendRefs]
+            properties:
+              name:
+                type: string
+                pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+              matches:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  properties:
+                    headers:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, value]
+                        properties:
+                          name: { type: string }
+                          value: { type: string }
+                          type: { type: string, enum: [Exact, RegularExpression], default: Exact }
+                    cookies:
+                      type: array
+                      maxItems: 1
+                      items:
+                        type: object
+                        required: [name, value]
+                        properties:
+                          name: { type: string, pattern: "^[A-Za-z0-9_-]+$" }
+                          value: { type: string, pattern: "^[A-Za-z0-9_.-]+$" }
+                    queryParams:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, value]
+                        properties:
+                          name: { type: string }
+                          value: { type: string }
+                    method:
+                      type: string
+                      enum: [GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH]
+              backendRefs:
+                type: array
+                minItems: 1
+                maxItems: 16
+                items:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string }
+                    weight: { type: integer, minimum: 0, default: 1 }
+        mirrors:
+          type: array
+          default: []
+          items:
+            type: object
+            required: [backendRef, percent]
+            properties:
+              backendRef: { type: string }
+              percent: { type: integer, minimum: 0, maximum: 100 }
+  validations:
+    - rule: >-
+        ${has(dataplane.annotations) && "openchoreo.dev/service-mesh" in dataplane.annotations &&
+          dataplane.annotations["openchoreo.dev/service-mesh"] in ["istio", "cilium", "linkerd"]}
+      message: >-
+        mesh-gamma needs a service mesh on the data plane: annotate the DataPlane
+        with openchoreo.dev/service-mesh set to istio, cilium or linkerd
+    - rule: ${takeOver != null}
+      message: mesh-gamma routes the taken-over component's Service; set spec.takeOver
+    - rule: ${backends.all(b, b.protocol in ["HTTP", "GraphQL", "Websocket"])}
+      message: mesh-gamma only routes HTTP, GraphQL and Websocket endpoints
+    - rule: >-
+        ${parameters.rules.all(r, r.backendRefs.all(rb, backends.exists(b, b.name == rb.name)))}
+      message: a rule targets a backend that is not in spec.backendRefs or not deployed in this environment
+    - rule: ${parameters.mirrors.all(m, backends.exists(b, b.name == m.backendRef))}
+      message: a mirror targets a backend that is not in spec.backendRefs or not deployed in this environment
+    - rule: >-
+        ${size(parameters.mirrors) == 0 ||
+          dataplane.annotations["openchoreo.dev/service-mesh"] != "linkerd"}
+      message: Linkerd does not support request mirroring; remove parameters.mirrors on this data plane
+  resources:
+    - id: mesh-route
+      targetPlane: dataplane
+      template:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: ${metadata.name}
+          namespace: ${metadata.namespace}
+          # A mesh route serves in-cluster callers, not a gateway; "project"
+          # keeps it from claiming the component's gateway routes.
+          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-visibility": "project"})}'
+        spec:
+          parentRefs:
+            - group: ""
+              kind: Service
+              name: ${takeOver.serviceName}
+              port: ${takeOver.port}
+          # One rule per parameters.rules entry, in order, then the default
+          # split. Cookies match as a regex on the Cookie header.
+          rules: |
+            ${parameters.rules.map(r, {
+                "matches": r.matches.map(m, {
+                  "headers": size(m.?headers.orValue([]) + m.?cookies.orValue([])) > 0
+                    ? m.?headers.orValue([]).map(h, {"type": h.type, "name": h.name, "value": h.value}) +
+                      m.?cookies.orValue([]).map(c, {"type": "RegularExpression", "name": "cookie",
+                        "value": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"})
+                    : oc_omit(),
+                  "queryParams": size(m.?queryParams.orValue([])) > 0
+                    ? m.queryParams.map(q, {"type": "Exact", "name": q.name, "value": q.value})
+                    : oc_omit(),
+                  ?"method": m.?method
+                }),
+                "backendRefs": r.backendRefs.map(rb, backends.filter(b, b.name == rb.name)
+                  .map(b, {"name": b.serviceName, "port": b.port, "weight": rb.weight})[0])
+              }) + [{
+                "backendRefs": backends.filter(b, b.weight > 0)
+                  .map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight}),
+                "filters": size(parameters.mirrors) > 0
+                  ? parameters.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
+                      "backendRef": backends.filter(b, b.name == mi.backendRef)
+                        .map(b, {"name": b.serviceName, "port": b.port})[0],
+                      "percent": mi.percent}})
+                  : oc_omit()
+              }]}

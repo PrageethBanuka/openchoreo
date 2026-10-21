@@ -53,7 +53,7 @@ func (r *Reconciler) resolveBackends(
 	res := &backendResolution{}
 
 	for _, ref := range release.Spec.BackendRefs {
-		weight := controller.EndpointBackendWeight(ref)
+		weight := effectiveWeight(binding, ref)
 
 		if ref.External != nil {
 			url := externalURL(binding, ref)
@@ -117,13 +117,30 @@ func (r *Reconciler) resolveBackends(
 	return res, nil
 }
 
+// findOverride returns the binding's override for the named backend, or nil.
+func findOverride(binding *openchoreov1alpha1.EndpointReleaseBinding, name string) *openchoreov1alpha1.EndpointBackendOverride {
+	for i := range binding.Spec.BackendOverrides {
+		if binding.Spec.BackendOverrides[i].Name == name {
+			return &binding.Spec.BackendOverrides[i]
+		}
+	}
+	return nil
+}
+
+// effectiveWeight returns a backend's weight in the binding's environment: the
+// binding's override for it, or the release's weight.
+func effectiveWeight(binding *openchoreov1alpha1.EndpointReleaseBinding, ref openchoreov1alpha1.EndpointBackendRef) int32 {
+	if o := findOverride(binding, ref.Name); o != nil && o.Weight != nil {
+		return *o.Weight
+	}
+	return controller.EndpointBackendWeight(ref)
+}
+
 // externalURL returns the URL an external backend calls in the binding's
 // environment: the binding's override for it, or the release's default.
 func externalURL(binding *openchoreov1alpha1.EndpointReleaseBinding, ref openchoreov1alpha1.EndpointBackendRef) string {
-	for _, o := range binding.Spec.BackendOverrides {
-		if o.Name == ref.Name && o.External != nil && o.External.URL != "" {
-			return o.External.URL
-		}
+	if o := findOverride(binding, ref.Name); o != nil && o.External != nil && o.External.URL != "" {
+		return o.External.URL
 	}
 	return ref.External.URL
 }
@@ -180,6 +197,10 @@ func (r *Reconciler) resolveTakeOver(
 		ComponentName: ref.Name,
 		Endpoint:      ref.Endpoint,
 		BasePath:      backend.BasePath,
+		ServiceName:   backend.ServiceName,
+		Namespace:     backend.Namespace,
+		Port:          backend.Port,
+		ServiceURL:    backend.ServiceURL,
 		External:      backend.ComponentURLs.External,
 		Internal:      backend.ComponentURLs.Internal,
 	}, "", nil

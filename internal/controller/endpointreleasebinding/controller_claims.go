@@ -66,12 +66,14 @@ func updateServingClaim(
 
 // routeVisibilities returns the distinct visibilities of the rendered Gateway
 // API routes, read from their openchoreo.dev/endpoint-visibility label and
-// defaulting to external, sorted for a stable status.
+// defaulting to external, sorted for a stable status. Mesh routes, whose
+// parents are all Services (GAMMA), serve in-cluster callers rather than a
+// gateway, so they claim no gateway visibility.
 func routeVisibilities(output *endpointpipeline.RenderOutput) []openchoreov1alpha1.EndpointVisibility {
 	var visibilities []openchoreov1alpha1.EndpointVisibility
 	for i := range output.Entries {
 		obj := &unstructured.Unstructured{Object: output.Entries[i].Object}
-		if endpointurl.RouteKind(obj) == "" {
+		if endpointurl.RouteKind(obj) == "" || isMeshRoute(obj) {
 			continue
 		}
 		v := openchoreov1alpha1.EndpointVisibility(obj.GetLabels()[labels.LabelKeyEndpointVisibility])
@@ -84,6 +86,27 @@ func routeVisibilities(output *endpointpipeline.RenderOutput) []openchoreov1alph
 	}
 	slices.Sort(visibilities)
 	return visibilities
+}
+
+// isMeshRoute reports whether every parentRef of a Gateway API route is a
+// core Service, which makes it a GAMMA mesh route.
+func isMeshRoute(obj *unstructured.Unstructured) bool {
+	parents, found, err := unstructured.NestedSlice(obj.Object, "spec", "parentRefs")
+	if err != nil || !found || len(parents) == 0 {
+		return false
+	}
+	for _, p := range parents {
+		ref, ok := p.(map[string]any)
+		if !ok {
+			return false
+		}
+		kind, _ := ref["kind"].(string)
+		group, _ := ref["group"].(string)
+		if kind != "Service" || (group != "" && group != "core") {
+			return false
+		}
+	}
+	return true
 }
 
 func sameClaim(a, b *openchoreov1alpha1.EndpointServingClaim) bool {

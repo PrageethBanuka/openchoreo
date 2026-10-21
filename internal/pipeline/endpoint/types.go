@@ -160,6 +160,15 @@ type URLContext struct {
 	// Templates rewrite the served path prefix to it.
 	BasePath string `json:"basePath"`
 
+	// ServiceName, Namespace and Port locate the component's in-cluster
+	// Service for that workload endpoint, and ServiceURL is its full URL: the
+	// address in-cluster callers already use. Service-addressed (mesh) types
+	// key their routes on it.
+	ServiceName string `json:"serviceName,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+	Port        int32  `json:"port,omitempty"`
+	ServiceURL  string `json:"serviceURL,omitempty"`
+
 	External *Address `json:"external,omitempty"`
 	Internal *Address `json:"internal,omitempty"`
 }

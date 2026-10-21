@@ -26,6 +26,10 @@ const (
 // hostname must match the EndpointType's allowedHostnames. A non-empty problem
 // means the address can't be served here.
 func resolveAddress(binding *openchoreov1alpha1.EndpointReleaseBinding, in *reconcileInputs) (endpointpipeline.AddressContext, string) {
+	if in.release.Spec.Address == nil {
+		return endpointpipeline.AddressContext{}, fmt.Sprintf("%s %q serves the Endpoint's own address, but the Endpoint has none; set spec.address",
+			in.release.Spec.EndpointType.Kind, in.release.Spec.EndpointType.Name)
+	}
 	addr := endpointpipeline.AddressContext{Path: in.release.Spec.Address.Path}
 
 	host := binding.Spec.Hostname

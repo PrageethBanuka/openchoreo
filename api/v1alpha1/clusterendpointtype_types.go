@@ -39,6 +39,15 @@ type ClusterEndpointTypeSpec struct {
 	// +kubebuilder:default={Component}
 	AllowedBackendKinds []EndpointBackendKind `json:"allowedBackendKinds,omitempty"`
 
+	// AddressKind is the kind of address Endpoints of this type serve. Gateway
+	// types serve the Endpoint's own address, a host and path on a gateway.
+	// Service types serve the in-cluster Service of the component the Endpoint
+	// takes over, so callers inside the cluster keep their URL (for example a
+	// service mesh route); their Endpoints set takeOver and no address.
+	// +optional
+	// +kubebuilder:default=Gateway
+	AddressKind EndpointAddressKind `json:"addressKind,omitempty"`
+
 	// Resources are the routing manifests (e.g. HTTPRoute, Ingress,
 	// CiliumEnvoyConfig) the ClusterEndpointType emits on the data plane for each
 	// EndpointReleaseBinding. Uses the same templating engine as ComponentType.

@@ -29,7 +29,7 @@ func endpoint(name, project, path string, backends ...string) *openchoreodevv1al
 		Spec: openchoreodevv1alpha1.EndpointSpec{
 			Owner:   openchoreodevv1alpha1.EndpointOwner{ProjectName: project},
 			Type:    openchoreodevv1alpha1.EndpointTypeRef{Kind: openchoreodevv1alpha1.EndpointTypeRefKindClusterEndpointType, Name: typeName},
-			Address: openchoreodevv1alpha1.EndpointAddress{Path: path},
+			Address: &openchoreodevv1alpha1.EndpointAddress{Path: path},
 		},
 	}
 	for _, c := range backends {
@@ -210,4 +210,55 @@ func TestValidateUpdateChecksOnlyChangedClaims(t *testing.T) {
 	v = validator(t, clusterType(nil), holderTakeOver)
 	_, err = v.ValidateUpdate(context.Background(), added, withTakeOver)
 	refused(t, err, "already taken over")
+}
+
+func TestValidateAddressKind(t *testing.T) {
+	serviceType := clusterType(nil)
+	serviceType.Spec.AddressKind = openchoreodevv1alpha1.EndpointAddressKindService
+	meshEndpoint := func() *openchoreodevv1alpha1.Endpoint {
+		ep := takingOver(endpoint("orders-mesh", "shop", "", "payments-v1", "payments-v2"))
+		ep.Spec.Address = nil
+		return ep
+	}
+
+	_, err := validator(t, serviceType).ValidateCreate(context.Background(), meshEndpoint())
+	require.NoError(t, err, "a Service type serves the taken-over Service")
+
+	withAddress := takingOver(endpoint("orders-mesh", "shop", "/orders", "payments-v1"))
+	_, err = validator(t, serviceType).ValidateCreate(context.Background(), withAddress)
+	refused(t, err, "remove spec.address")
+
+	noTakeOver := meshEndpoint()
+	noTakeOver.Spec.TakeOver = nil
+	_, err = validator(t, serviceType).ValidateCreate(context.Background(), noTakeOver)
+	refused(t, err, "set spec.takeOver")
+
+	_, err = validator(t, clusterType(nil)).ValidateCreate(context.Background(), meshEndpoint())
+	refused(t, err, "set spec.address.path")
+}
+
+func TestValidateParameters(t *testing.T) {
+	typed := clusterType(nil)
+	typed.Spec.Parameters = &openchoreodevv1alpha1.SchemaSection{OpenAPIV3Schema: &runtime.RawExtension{Raw: []byte(`{
+		"type": "object",
+		"properties": {
+			"mirrors": {"type": "array", "items": {"type": "object", "required": ["backendRef", "percent"],
+				"properties": {"backendRef": {"type": "string"}, "percent": {"type": "integer", "minimum": 0, "maximum": 100}}}}
+		},
+		"additionalProperties": false
+	}`)}}
+	withParams := func(raw string) *openchoreodevv1alpha1.Endpoint {
+		ep := endpoint("orders-api", "shop", "/orders", "orders-v1")
+		ep.Spec.Parameters = &runtime.RawExtension{Raw: []byte(raw)}
+		return ep
+	}
+
+	_, err := validator(t, typed).ValidateCreate(context.Background(), withParams(`{"mirrors":[{"backendRef":"orders-v1","percent":10}]}`))
+	require.NoError(t, err)
+
+	_, err = validator(t, typed).ValidateCreate(context.Background(), withParams(`{"mirrors":[{"backendRef":"orders-v1","percent":150}]}`))
+	refused(t, err, "parameters do not match the schema")
+
+	_, err = validator(t, typed).ValidateCreate(context.Background(), withParams(`{"rules":[]}`))
+	refused(t, err, "parameters do not match the schema")
 }

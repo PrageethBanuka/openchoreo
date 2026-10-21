@@ -11817,6 +11817,13 @@ components:
           items:
             type: string
             enum: [Component, External]
+        addressKind:
+          type: string
+          description: >-
+            Kind of address Endpoints of this type serve. Gateway serves the Endpoint's own host and path on a
+            gateway; Service serves the taken-over component's in-cluster Service (for example a service mesh route).
+          enum: [Gateway, Service]
+          default: Gateway
         resources:
           type: array
           description: Routing manifests (e.g. HTTPRoute, GRPCRoute, VirtualService) emitted on the data plane for each EndpointReleaseBinding.
@@ -12050,11 +12057,13 @@ components:
 
     EndpointSpec:
       type: object
-      description: Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed.
+      description: >-
+        Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation;
+        spec.takeOver can be added or removed but not changed. spec.address is required when the type's
+        addressKind is Gateway and must be unset when it is Service.
       required:
         - owner
         - type
-        - address
       properties:
         owner:
           type: object
@@ -12306,6 +12315,12 @@ components:
                 example: legacy
               external:
                 $ref: '#/components/schemas/EndpointExternalRef'
+              weight:
+                type: integer
+                format: int32
+                minimum: 0
+                maximum: 1000000
+                description: Replaces the release's weight for this backend in this environment
 
     EndpointResolvedAddress:
       type: object

@@ -68,6 +68,9 @@ spec:
                   Address is the URL this Endpoint serves: a path, on the environment's
                   gateway host or on its own hostname. It belongs to the Endpoint, so it
                   stays the same whatever backends answer it, and it is fixed at creation.
+                  Required when the EndpointType's addressKind is Gateway (the default);
+                  Service types serve the taken-over component's in-cluster Service
+                  instead and must leave it unset.
                 properties:
                   hostname:
                     description: |-
@@ -251,7 +254,6 @@ spec:
                 - message: spec.type cannot be changed after creation
                   rule: self == oldSelf
             required:
-            - address
             - owner
             - type
             type: object
@@ -259,6 +261,9 @@ spec:
             - message: spec.takeOver can be added or removed but not changed
               rule: '!has(oldSelf.takeOver) || !has(self.takeOver) || self.takeOver
                 == oldSelf.takeOver'
+            - message: spec.address cannot be added or removed after creation; create
+                a new Endpoint to serve another address
+              rule: has(self.address) == has(oldSelf.address)
           status:
             description: EndpointStatus defines the observed state of Endpoint.
             properties:

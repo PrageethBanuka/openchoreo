@@ -49,6 +49,10 @@ const (
 	// disagrees with the binding's owner.
 	ReasonInvalidReleaseConfiguration controller.ConditionReason = "InvalidReleaseConfiguration"
 
+	// ReasonBackendOverrideInvalid indicates a backendOverrides entry names a
+	// backend the pinned EndpointRelease does not have.
+	ReasonBackendOverrideInvalid controller.ConditionReason = "BackendOverrideInvalid"
+
 	// ReasonEnvironmentNotFound indicates the referenced Environment does not exist.
 	ReasonEnvironmentNotFound controller.ConditionReason = "EnvironmentNotFound"
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -138,19 +139,27 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 				binding.Spec.Environment, strings.Join(resolution.unresolved, ", ")))
 		return ctrl.Result{}, nil
 	}
-	if len(resolution.backends) == 0 {
+	if !slices.ContainsFunc(resolution.backends, func(b endpointpipeline.Backend) bool { return b.Weight > 0 }) {
 		controller.MarkFalseCondition(binding, ConditionBackendsResolved, ReasonBackendsUnresolved,
-			"No backend with a non-zero weight is available")
+			"No backend with a non-zero weight is available; check the weights in spec.backendOverrides")
 		return ctrl.Result{}, nil
 	}
 
 	controller.MarkTrueCondition(binding, ConditionBackendsResolved, ReasonBackendsResolved,
 		fmt.Sprintf("%d backend(s) resolved", len(resolution.backends)))
 
-	address, problem := resolveAddress(binding, in)
-	if problem != "" {
-		markSyncedFalse(binding, ReasonAddressInvalid, "The Endpoint's address can't be served: "+problem)
-		return ctrl.Result{}, nil
+	// A Service-addressed type serves the taken-over component's in-cluster
+	// Service, not an address of its own, so there is no gateway address to
+	// resolve or to claim.
+	servesService := in.release.Spec.EndpointType.Spec.ServesService()
+	var address endpointpipeline.AddressContext
+	if !servesService {
+		var problem string
+		address, problem = resolveAddress(binding, in)
+		if problem != "" {
+			markSyncedFalse(binding, ReasonAddressInvalid, "The Endpoint's address can't be served: "+problem)
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// A take-over the component can't serve here yet is not an error: the
@@ -163,6 +172,14 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 	switch {
 	case in.release.Spec.TakeOver == nil:
 		meta.RemoveStatusCondition(&binding.Status.Conditions, string(ConditionTakeOver))
+	case pending != "" && servesService:
+		// The taken-over Service is the only address a Service type serves, so
+		// there is nothing to route until it exists here.
+		controller.MarkFalseCondition(binding, ConditionTakeOver, ReasonTakeOverPending,
+			"Nothing to route yet; the taken-over Service follows once it is available: "+pending)
+		markSyncedFalse(binding, ReasonTakeOverPending,
+			"Waiting for the taken-over component's Service in environment "+binding.Spec.Environment)
+		return ctrl.Result{}, nil
 	case pending != "":
 		controller.MarkFalseCondition(binding, ConditionTakeOver, ReasonTakeOverPending,
 			"Serving the Endpoint's own address only; the taken-over URL follows once it is available: "+pending)
@@ -171,14 +188,17 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 			fmt.Sprintf("Also serving the URL of %s/%s", takeOver.ComponentName, takeOver.Endpoint))
 	}
 
-	addrs := servedAddresses(address, takeOver)
-	conflict, err := r.addressConflict(ctx, binding, in.release, addrs)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if conflict != "" {
-		markSyncedFalse(binding, ReasonAddressInUse, conflict+"; this binding routes nothing until the address is free")
-		return ctrl.Result{}, nil
+	var addrs []openchoreov1alpha1.EndpointResolvedAddress
+	if !servesService {
+		addrs = servedAddresses(address, takeOver)
+		conflict, err := r.addressConflict(ctx, binding, in.release, addrs)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if conflict != "" {
+			markSyncedFalse(binding, ReasonAddressInUse, conflict+"; this binding routes nothing until the address is free")
+			return ctrl.Result{}, nil
+		}
 	}
 	binding.Status.Addresses = addrs
 
@@ -215,6 +235,10 @@ func (r *Reconciler) loadInputs(ctx context.Context, binding *openchoreov1alpha1
 	}
 	if err := validateReleaseOwner(in.release, binding); err != nil {
 		markSyncedFalse(binding, ReasonInvalidReleaseConfiguration, err.Error())
+		return nil, nil
+	}
+	if err := validateBackendOverrides(in.release, binding); err != nil {
+		markSyncedFalse(binding, ReasonBackendOverrideInvalid, err.Error())
 		return nil, nil
 	}
 
@@ -435,6 +459,28 @@ func validateReleaseOwner(release *openchoreov1alpha1.EndpointRelease, binding *
 		return fmt.Errorf("binding owner (project: %q, endpoint: %q) does not match EndpointRelease owner (project: %q, endpoint: %q)",
 			binding.Spec.Owner.ProjectName, binding.Spec.Owner.EndpointName,
 			release.Spec.Owner.ProjectName, release.Spec.Owner.EndpointName)
+	}
+	return nil
+}
+
+// validateBackendOverrides checks that every backendOverrides entry names a
+// backend of the pinned release, so a typo can't silently leave a weight or URL
+// unchanged. A binding can be applied before its release (GitOps), so this is
+// checked here rather than at admission.
+func validateBackendOverrides(release *openchoreov1alpha1.EndpointRelease, binding *openchoreov1alpha1.EndpointReleaseBinding) error {
+	known := make(map[string]struct{}, len(release.Spec.BackendRefs))
+	for _, ref := range release.Spec.BackendRefs {
+		known[ref.Name] = struct{}{}
+	}
+	var unknown []string
+	for _, o := range binding.Spec.BackendOverrides {
+		if _, ok := known[o.Name]; !ok {
+			unknown = append(unknown, o.Name)
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("spec.backendOverrides names backend(s) not in EndpointRelease %q: %s",
+			release.Name, strings.Join(unknown, ", "))
 	}
 	return nil
 }

@@ -119,4 +119,19 @@ rules:
   - gatewayparameters
   - trafficpolicies
   verbs: ["*"]
+{{- if .Values.clusterAgent.rbac.serviceMesh.istio }}
+# Istio routing (mesh EndpointTypes)
+- apiGroups: ["networking.istio.io"]
+  resources:
+  - virtualservices
+  - destinationrules
+  verbs: ["*"]
+{{- end }}
+{{- if .Values.clusterAgent.rbac.serviceMesh.cilium }}
+# Cilium Envoy config (mesh EndpointTypes)
+- apiGroups: ["cilium.io"]
+  resources:
+  - ciliumenvoyconfigs
+  verbs: ["*"]
+{{- end }}
 {{- end }}

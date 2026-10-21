@@ -272,6 +272,27 @@
               "description": "Create RBAC resources (ClusterRole, ClusterRoleBinding)",
               "title": "create",
               "type": "boolean"
+            },
+            "serviceMesh": {
+              "additionalProperties": false,
+              "description": "Grant the cluster agent the service mesh routing kinds that mesh EndpointTypes render. Enable the mesh installed on this data plane.",
+              "properties": {
+                "cilium": {
+                  "default": false,
+                  "description": "Allow CiliumEnvoyConfigs",
+                  "title": "cilium",
+                  "type": "boolean"
+                },
+                "istio": {
+                  "default": false,
+                  "description": "Allow Istio VirtualServices and DestinationRules",
+                  "title": "istio",
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "title": "serviceMesh",
+              "type": "object"
             }
           },
           "required": [],

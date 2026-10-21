@@ -165,6 +165,12 @@ type DataPlaneContext struct {
 	// reference ${dataplane.observabilityPlaneRef.*} must guard with
 	// has(dataplane.observabilityPlaneRef).
 	ObservabilityPlaneRef *ObservabilityPlaneRefContext `json:"observabilityPlaneRef,omitempty"`
+
+	// Annotations are the DataPlane's (or ClusterDataPlane's) annotations, the
+	// same surface the component pipeline exposes. Templates read capability
+	// markers from them, for example openchoreo.dev/service-mesh. Nil when the
+	// DataPlane has none; guard with has(dataplane.annotations).
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // EnvironmentContext is the per-environment surface exposed to CEL templates

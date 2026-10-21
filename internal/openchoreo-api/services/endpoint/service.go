@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -129,10 +130,10 @@ func (s *endpointService) UpdateEndpoint(ctx context.Context, namespaceName stri
 	}
 	// An update that leaves the address out keeps it; changing it is refused,
 	// since the address is the Endpoint's identity.
-	if ep.Spec.Address == (openchoreov1alpha1.EndpointAddress{}) {
+	if ep.Spec.Address == nil || *ep.Spec.Address == (openchoreov1alpha1.EndpointAddress{}) {
 		ep.Spec.Address = existing.Spec.Address
 	}
-	if ep.Spec.Address != existing.Spec.Address {
+	if !equality.Semantic.DeepEqual(ep.Spec.Address, existing.Spec.Address) {
 		return nil, &services.ValidationError{Msg: "spec.address is immutable; create a new Endpoint to serve another address"}
 	}
 

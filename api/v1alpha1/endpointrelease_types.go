@@ -26,8 +26,9 @@ type EndpointReleaseSpec struct {
 	EndpointType EndpointReleaseEndpointType `json:"endpointType"`
 
 	// Address is the URL the Endpoint serves, copied from the Endpoint spec.
-	// +kubebuilder:validation:Required
-	Address EndpointAddress `json:"address"`
+	// Unset for Endpoints of a Service-addressed type.
+	// +optional
+	Address *EndpointAddress `json:"address,omitempty"`
 
 	// TakeOver is the component URL the Endpoint also serves, if any.
 	// +optional

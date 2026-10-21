@@ -77,7 +77,7 @@ var _ = Describe("Endpoint Controller", func() {
 			Spec: openchoreov1alpha1.EndpointSpec{
 				Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: project},
 				Type:        typeRef,
-				Address:     openchoreov1alpha1.EndpointAddress{Path: "/" + name},
+				Address:     &openchoreov1alpha1.EndpointAddress{Path: "/" + name},
 				BackendRefs: refs,
 			},
 		}
@@ -263,7 +263,7 @@ var _ = Describe("Endpoint Controller", func() {
 			Spec: openchoreov1alpha1.EndpointSpec{
 				Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: project},
 				Type:        typeRef,
-				Address:     address,
+				Address:     &address,
 				TakeOver:    takeOver,
 				BackendRefs: refs,
 			},

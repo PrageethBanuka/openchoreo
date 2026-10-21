@@ -60,7 +60,7 @@ func testEndpointObj(name string, components ...string) *openchoreov1alpha1.Endp
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: testEPProject},
 			Type:        openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http-weighted"},
-			Address:     openchoreov1alpha1.EndpointAddress{Path: "/" + name},
+			Address:     &openchoreov1alpha1.EndpointAddress{Path: "/" + name},
 			BackendRefs: refs,
 		},
 	}
@@ -75,7 +75,7 @@ func newEndpointBody(name string, weights ...int32) gen.Endpoint {
 		Metadata: gen.ObjectMeta{Name: name},
 		Spec: &gen.EndpointSpec{
 			Type:        gen.EndpointTypeRef{Kind: ptr.To(gen.EndpointTypeRefKindClusterEndpointType), Name: "http-weighted"},
-			Address:     gen.EndpointAddress{Path: "/" + name},
+			Address:     &gen.EndpointAddress{Path: "/" + name},
 			BackendRefs: &refs,
 		},
 	}
@@ -215,7 +215,7 @@ func TestUpdateEndpointHandler(t *testing.T) {
 	t.Run("success - changes the split", func(t *testing.T) {
 		h := newHandlerWithEndpointService(newEndpointService(t, []client.Object{testEndpointObj("payments-api", "payments-v1", "payments-v2")}, &allowAllPDP{}))
 		body := newEndpointBody("ignored", 50, 50)
-		body.Spec.Address = gen.EndpointAddress{Path: "/payments-api"}
+		body.Spec.Address = &gen.EndpointAddress{Path: "/payments-api"}
 		resp, err := h.UpdateEndpoint(ctx, gen.UpdateEndpointRequestObject{NamespaceName: testEPNs, EndpointName: "payments-api", Body: &body})
 		require.NoError(t, err)
 		typed, ok := resp.(gen.UpdateEndpoint200JSONResponse)
@@ -228,7 +228,7 @@ func TestUpdateEndpointHandler(t *testing.T) {
 	t.Run("address change returns 400", func(t *testing.T) {
 		h := newHandlerWithEndpointService(newEndpointService(t, []client.Object{testEndpointObj("payments-api", "payments-v1")}, &allowAllPDP{}))
 		body := newEndpointBody("payments-api", 100)
-		body.Spec.Address = gen.EndpointAddress{Path: "/moved"}
+		body.Spec.Address = &gen.EndpointAddress{Path: "/moved"}
 		resp, err := h.UpdateEndpoint(ctx, gen.UpdateEndpointRequestObject{NamespaceName: testEPNs, EndpointName: "payments-api", Body: &body})
 		require.NoError(t, err)
 		assert.IsType(t, gen.UpdateEndpoint400JSONResponse{}, resp)

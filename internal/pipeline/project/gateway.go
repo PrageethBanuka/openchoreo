@@ -24,6 +24,9 @@ func BuildDataPlaneContext(dataPlane *v1alpha1.DataPlane) DataPlaneContext {
 		}
 	}
 	dpCtx.Gateway = toGatewayData(&dataPlane.Spec.Gateway)
+	if len(dataPlane.Annotations) > 0 {
+		dpCtx.Annotations = dataPlane.Annotations
+	}
 	return dpCtx
 }
 

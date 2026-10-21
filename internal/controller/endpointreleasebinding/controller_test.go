@@ -92,7 +92,7 @@ func newRelease(name string, refs ...openchoreov1alpha1.EndpointBackendRef) *ope
 				Name: "http-weighted",
 				Spec: weightedRouteSpec(),
 			},
-			Address:     openchoreov1alpha1.EndpointAddress{Path: "/pay"},
+			Address:     &openchoreov1alpha1.EndpointAddress{Path: "/pay"},
 			TakeOver:    takeOver,
 			BackendRefs: refs,
 		},
@@ -578,6 +578,114 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		Expect(reqs).To(ConsistOf(reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: "checkout-api-dev", Namespace: testNS},
 		}))
+	})
+
+	Context("progressive delivery", func() {
+		// meshRelease is a Service-addressed release: a GAMMA mesh route on the
+		// taken-over payments-v1 Service, with no address of its own. The route
+		// carries no visibility label, so only its Service parent keeps it from
+		// claiming gateway routes.
+		meshRelease := func(name string) *openchoreov1alpha1.EndpointRelease {
+			rel := newRelease(name, refs...)
+			rel.Spec.Address = nil
+			rel.Spec.EndpointType.Name = "mesh-gamma"
+			rel.Spec.EndpointType.Spec = openchoreov1alpha1.EndpointTypeSpec{
+				AddressKind: openchoreov1alpha1.EndpointAddressKindService,
+				Resources: []openchoreov1alpha1.ResourceTemplate{{
+					ID: "route",
+					Template: mustRaw(map[string]any{
+						"apiVersion": "gateway.networking.k8s.io/v1",
+						"kind":       "HTTPRoute",
+						"metadata":   map[string]any{"name": "${metadata.name}", "namespace": "${metadata.namespace}"},
+						"spec": map[string]any{
+							"parentRefs": []any{map[string]any{
+								"group": "", "kind": "Service", "name": "${takeOver.serviceName}", "port": "${takeOver.port}",
+							}},
+							"rules": []any{map[string]any{
+								"backendRefs": `${backends.map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})}`,
+							}},
+						},
+					}),
+				}},
+			}
+			return rel
+		}
+
+		It("applies a binding's weight override without a new release", func() {
+			binding := newBinding("rel-1")
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{{Name: "payments-v2", Weight: ptr.To[int32](50)}}
+			setup(newRelease("rel-1", refs...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			Expect(routeBackendRefs(getRenderedRelease(b))).To(MatchJSON(`[
+				{"name":"payments-v1","port":8080,"weight":90},
+				{"name":"payments-v2","port":8080,"weight":50}
+			]`))
+			Expect(b.Status.Backends[1].Weight).To(Equal(int32(50)), "status reports the effective weight")
+		})
+
+		It("refuses an override that names a backend the release doesn't have", func() {
+			binding := newBinding("rel-1")
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{{Name: "payments-v9", Weight: ptr.To[int32](50)}}
+			setup(newRelease("rel-1", refs...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			Expect(condition(b, string(ConditionSynced)).Reason).To(Equal(string(ReasonBackendOverrideInvalid)))
+			Expect(condition(b, string(ConditionSynced)).Message).To(ContainSubstring("payments-v9"))
+		})
+
+		It("routes nothing when the overrides leave no backend with weight", func() {
+			binding := newBinding("rel-1")
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{
+				{Name: "payments-v1", Weight: ptr.To[int32](0)},
+				{Name: "payments-v2", Weight: ptr.To[int32](0)},
+			}
+			setup(newRelease("rel-1", refs...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			Expect(condition(b, string(ConditionBackendsResolved)).Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition(b, string(ConditionBackendsResolved)).Message).To(ContainSubstring("backendOverrides"))
+		})
+
+		It("renders a Service-addressed type on the taken-over Service, with no address", func() {
+			setup(meshRelease("rel-1"), newBinding("rel-1"), componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			Expect(condition(b, string(ConditionSynced)).Status).To(Equal(metav1.ConditionTrue))
+			Expect(b.Status.Addresses).To(BeEmpty(), "a Service type claims no gateway address")
+
+			var route map[string]any
+			Expect(json.Unmarshal(getRenderedRelease(b).Spec.Resources[0].Object.Raw, &route)).To(Succeed())
+			parents, err := json.Marshal(route["spec"].(map[string]any)["parentRefs"])
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(parents)).To(MatchJSON(`[{"group":"","kind":"Service","name":"payments-v1","port":8080}]`))
+		})
+
+		It("waits for the taken-over Service before rendering a Service-addressed type", func() {
+			rel := meshRelease("rel-1")
+			rel.Spec.TakeOver = &openchoreov1alpha1.EndpointTakeOver{
+				Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-legacy", Endpoint: "api"},
+			}
+			setup(rel, newBinding("rel-1"), componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			Expect(condition(b, string(ConditionSynced)).Reason).To(Equal(string(ReasonTakeOverPending)))
+			rr := &openchoreov1alpha1.RenderedRelease{}
+			err := cli.Get(bctx, types.NamespacedName{Name: makeRenderedReleaseName(b), Namespace: testNS}, rr)
+			Expect(err).To(HaveOccurred(), "nothing is rendered until the Service exists")
+		})
+
+		It("claims the taken-over URL but no gateway visibility for a mesh route", func() {
+			setup(meshRelease("rel-1"), newBinding("rel-1"), componentBinding("payments-v1"), componentBinding("payments-v2"))
+
+			b := reconcileBinding()
+			markApplied(getRenderedRelease(b), openchoreov1alpha1.HealthStatusHealthy)
+			b = reconcileBinding()
+			Expect(b.Status.Serving).NotTo(BeNil())
+			Expect(b.Status.Serving.URLs).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{{ComponentName: "payments-v1", Endpoint: "api"}}))
+			Expect(b.Status.Serving.Visibilities).To(BeEmpty(),
+				"the component keeps its gateway routes; the mesh route only serves in-cluster callers")
+		})
 	})
 
 	Context("serving claim", func() {

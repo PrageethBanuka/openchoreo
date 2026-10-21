@@ -234,6 +234,12 @@ const (
 	EndpointTypeResourceTargetPlaneObservabilityplane EndpointTypeResourceTargetPlane = "observabilityplane"
 )
 
+// Defines values for EndpointTypeSpecAddressKind.
+const (
+	Gateway EndpointTypeSpecAddressKind = "Gateway"
+	Service EndpointTypeSpecAddressKind = "Service"
+)
+
 // Defines values for EndpointTypeSpecAllowedBackendKinds.
 const (
 	EndpointTypeSpecAllowedBackendKindsComponent EndpointTypeSpecAllowedBackendKinds = "Component"
@@ -2074,7 +2080,7 @@ type Endpoint struct {
 	// Matches the structure of metav1.ObjectMeta for the fields exposed via the API.
 	Metadata ObjectMeta `json:"metadata"`
 
-	// Spec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed.
+	// Spec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed. spec.address is required when the type's addressKind is Gateway and must be unset when it is Service.
 	Spec   *EndpointSpec   `json:"spec,omitempty"`
 	Status *EndpointStatus `json:"status,omitempty"`
 }
@@ -2206,6 +2212,9 @@ type EndpointReleaseBindingSpec struct {
 		// External A service outside OpenChoreo.
 		External *EndpointExternalRef `json:"external,omitempty"`
 		Name     string               `json:"name"`
+
+		// Weight Replaces the release's weight for this backend in this environment
+		Weight *int32 `json:"weight,omitempty"`
 	} `json:"backendOverrides,omitempty"`
 
 	// EndpointRelease Pinned EndpointRelease name. The binding stays pending until it is set.
@@ -2345,10 +2354,10 @@ type EndpointServingClaim struct {
 // EndpointServingClaimVisibilities defines model for EndpointServingClaim.Visibilities.
 type EndpointServingClaimVisibilities string
 
-// EndpointSpec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed.
+// EndpointSpec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed. spec.address is required when the type's addressKind is Gateway and must be unset when it is Service.
 type EndpointSpec struct {
 	// Address The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
-	Address EndpointAddress `json:"address"`
+	Address *EndpointAddress `json:"address,omitempty"`
 
 	// BackendRefs Component workload endpoints receiving traffic, with relative weights. May be empty; see reclaimPolicy.
 	BackendRefs *[]EndpointBackendRef `json:"backendRefs,omitempty"`
@@ -2474,6 +2483,9 @@ type EndpointTypeResourceTargetPlane string
 
 // EndpointTypeSpec Desired state of a (Cluster)EndpointType.
 type EndpointTypeSpec struct {
+	// AddressKind Kind of address Endpoints of this type serve. Gateway serves the Endpoint's own host and path on a gateway; Service serves the taken-over component's in-cluster Service (for example a service mesh route).
+	AddressKind *EndpointTypeSpecAddressKind `json:"addressKind,omitempty"`
+
 	// AllowedBackendKinds Backend kinds Endpoints of this type may use. External must be allowed explicitly.
 	AllowedBackendKinds *[]EndpointTypeSpecAllowedBackendKinds `json:"allowedBackendKinds,omitempty"`
 
@@ -2492,6 +2504,9 @@ type EndpointTypeSpec struct {
 	// Validations CEL-based validation rules evaluated before rendering
 	Validations *[]ValidationRule `json:"validations,omitempty"`
 }
+
+// EndpointTypeSpecAddressKind Kind of address Endpoints of this type serve. Gateway serves the Endpoint's own host and path on a gateway; Service serves the taken-over component's in-cluster Service (for example a service mesh route).
+type EndpointTypeSpecAddressKind string
 
 // EndpointTypeSpecAllowedBackendKinds defines model for EndpointTypeSpec.AllowedBackendKinds.
 type EndpointTypeSpecAllowedBackendKinds string

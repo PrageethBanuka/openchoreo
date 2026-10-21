@@ -1,0 +1,190 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterEndpointType
+metadata:
+  name: cilium-cec
+  annotations:
+    openchoreo.dev/description: >-
+      Routes in-cluster (east-west) calls to a component's Service through
+      Cilium's per-node Envoy, using a CiliumEnvoyConfig that redirects that
+      Service. Callers keep the URL they already use; Envoy splits it across
+      the Endpoint's backends by weight, after any header, cookie or query
+      rules, and can mirror a share to another backend. Needs Cilium with
+      kubeProxyReplacement=true and envoyConfig.enabled=true, and a DataPlane
+      annotated openchoreo.dev/service-mesh=cilium.
+spec:
+  addressKind: Service
+  allowedBackendKinds:
+    - Component
+  # The shared traffic schema (samples/mesh-endpoint-types/traffic-schema.yaml).
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        rules:
+          type: array
+          default: []
+          maxItems: 15
+          items:
+            type: object
+            required: [name, matches, backendRefs]
+            properties:
+              name:
+                type: string
+                pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+              matches:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  properties:
+                    headers:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, value]
+                        properties:
+                          name: { type: string }
+                          value: { type: string }
+                          type:
+                            {
+                              type: string,
+                              enum: [Exact, RegularExpression],
+                              default: Exact,
+                            }
+                    cookies:
+                      type: array
+                      maxItems: 1
+                      items:
+                        type: object
+                        required: [name, value]
+                        properties:
+                          name: { type: string, pattern: "^[A-Za-z0-9_-]+$" }
+                          value: { type: string, pattern: "^[A-Za-z0-9_.-]+$" }
+                    queryParams:
+                      type: array
+                      items:
+                        type: object
+                        required: [name, value]
+                        properties:
+                          name: { type: string }
+                          value: { type: string }
+                    method:
+                      type: string
+                      enum: [GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH]
+              backendRefs:
+                type: array
+                minItems: 1
+                maxItems: 16
+                items:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string }
+                    weight: { type: integer, minimum: 0, default: 1 }
+        mirrors:
+          type: array
+          default: []
+          items:
+            type: object
+            required: [backendRef, percent]
+            properties:
+              backendRef: { type: string }
+              percent: { type: integer, minimum: 0, maximum: 100 }
+  validations:
+    - rule: >-
+        ${has(dataplane.annotations) && "openchoreo.dev/service-mesh" in dataplane.annotations &&
+          dataplane.annotations["openchoreo.dev/service-mesh"] == "cilium"}
+      message: >-
+        cilium-cec needs Cilium's Envoy on the data plane: annotate the
+        DataPlane with openchoreo.dev/service-mesh=cilium
+    - rule: ${takeOver != null}
+      message: cilium-cec routes the taken-over component's Service; set spec.takeOver
+    - rule: ${backends.all(b, b.protocol in ["HTTP", "GraphQL", "Websocket"])}
+      message: cilium-cec only routes HTTP, GraphQL and Websocket endpoints
+    - rule: >-
+        ${parameters.rules.all(r, r.backendRefs.all(rb, backends.exists(b, b.name == rb.name)))}
+      message: a rule targets a backend that is not in spec.backendRefs or not deployed in this environment
+    - rule: ${parameters.mirrors.all(m, backends.exists(b, b.name == m.backendRef))}
+      message: a mirror targets a backend that is not in spec.backendRefs or not deployed in this environment
+  resources:
+    - id: envoy-config
+      targetPlane: dataplane
+      template:
+        apiVersion: cilium.io/v2
+        kind: CiliumEnvoyConfig
+        metadata:
+          name: ${metadata.name}
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+          annotations:
+            # Cilium asks hand-written east-west configs to set this, so pooled
+            # upstream connections don't collide on the 5-tuple.
+            cec.cilium.io/use-original-source-address: "false"
+        spec:
+          # Traffic to the taken-over Service goes to Envoy; the other
+          # backends' endpoints are synced to Envoy without redirecting them.
+          services:
+            - name: ${takeOver.serviceName}
+              namespace: ${takeOver.namespace}
+          backendServices: |
+            ${backends.filter(b, b.serviceName != takeOver.serviceName)
+              .map(b, {"name": b.serviceName, "namespace": b.namespace})}
+          # A listener, its routes (one per rule match, in order, then the
+          # default split), and one EDS cluster per backend named
+          # <namespace>/<service>, the name Cilium syncs endpoints under.
+          resources: |
+            ${[{
+                "@type": "type.googleapis.com/envoy.config.listener.v3.Listener",
+                "name": metadata.name + "-listener",
+                "filter_chains": [{"filters": [{
+                  "name": "envoy.filters.network.http_connection_manager",
+                  "typed_config": {
+                    "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+                    "stat_prefix": metadata.name,
+                    "rds": {"route_config_name": metadata.name + "-route"},
+                    "http_filters": [{
+                      "name": "envoy.filters.http.router",
+                      "typed_config": {"@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"}}]}}]}]
+              }, {
+                "@type": "type.googleapis.com/envoy.config.route.v3.RouteConfiguration",
+                "name": metadata.name + "-route",
+                "virtual_hosts": [{
+                  "name": metadata.name,
+                  "domains": ["*"],
+                  "routes": parameters.rules.map(r, r.matches.map(m, {
+                      "match": {
+                        "prefix": "/",
+                        "headers": size(m.?headers.orValue([]) + m.?cookies.orValue([])) > 0 || has(m.method)
+                          ? m.?headers.orValue([]).map(h, {"name": h.name, "string_match":
+                              h.type == "Exact" ? {"exact": h.value} : {"safe_regex": {"regex": h.value}}}) +
+                            m.?cookies.orValue([]).map(c, {"name": "cookie", "string_match":
+                              {"safe_regex": {"regex": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"}}}) +
+                            (has(m.method) ? [{"name": ":method", "string_match": {"exact": m.method}}] : [])
+                          : oc_omit(),
+                        "query_parameters": size(m.?queryParams.orValue([])) > 0
+                          ? m.queryParams.map(q, {"name": q.name, "string_match": {"exact": q.value}})
+                          : oc_omit()
+                      },
+                      "route": {"weighted_clusters": {"clusters": r.backendRefs.map(rb,
+                        backends.filter(b, b.name == rb.name)
+                          .map(b, {"name": b.namespace + "/" + b.serviceName, "weight": rb.weight})[0])}}
+                    })).flatten() + [{
+                      "match": {"prefix": "/"},
+                      "route": {
+                        "weighted_clusters": {"clusters": backends.filter(b, b.weight > 0)
+                          .map(b, {"name": b.namespace + "/" + b.serviceName, "weight": b.weight})},
+                        "request_mirror_policies": size(parameters.mirrors) > 0
+                          ? parameters.mirrors.map(mi, {
+                              "cluster": backends.filter(b, b.name == mi.backendRef)
+                                .map(b, b.namespace + "/" + b.serviceName)[0],
+                              "runtime_fraction": {"default_value": {"numerator": mi.percent, "denominator": "HUNDRED"}}})
+                          : oc_omit()
+                      }
+                    }]
+                }]
+              }] + backends.map(b, {
+                "@type": "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+                "name": b.namespace + "/" + b.serviceName,
+                "type": "EDS",
+                "connect_timeout": "5s"
+              })}

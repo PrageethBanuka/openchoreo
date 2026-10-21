@@ -70,8 +70,9 @@ spec:
               backendOverrides:
                 description: |-
                   BackendOverrides sets environment-specific values for the release's
-                  backends, matched by name. Today it sets an external backend's URL, so
-                  staging can call a staging service while the release stays the same.
+                  backends, matched by name: an external backend's URL, so staging can call
+                  a staging service, and a backend's weight, so each environment can run its
+                  own traffic split while the release stays the same.
                 items:
                   description: EndpointBackendOverride sets an environment-specific
                     value for one backend.
@@ -93,6 +94,16 @@ spec:
                       description: Name is the backend's name in the release.
                       minLength: 1
                       type: string
+                    weight:
+                      description: |-
+                        Weight replaces the release's weight for this backend in this
+                        environment, with the same semantics: relative to the other backends'
+                        weights, and 0 sends no traffic. It changes the split without cutting a
+                        new release; status.backends reports the effective weight.
+                      format: int32
+                      maximum: 1000000
+                      minimum: 0
+                      type: integer
                   required:
                   - name
                   type: object

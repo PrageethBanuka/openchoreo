@@ -305,7 +305,10 @@ func (r *Reconciler) conflict(ctx context.Context, ep *openchoreov1alpha1.Endpoi
 }
 
 // describeAddress renders an address for messages.
-func describeAddress(a openchoreov1alpha1.EndpointAddress) string {
+func describeAddress(a *openchoreov1alpha1.EndpointAddress) string {
+	if a == nil {
+		return "(none)"
+	}
 	if a.Hostname == "" {
 		return a.Path + " (environment host)"
 	}

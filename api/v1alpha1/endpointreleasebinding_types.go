@@ -46,8 +46,9 @@ type EndpointReleaseBindingSpec struct {
 	Hostname string `json:"hostname,omitempty"`
 
 	// BackendOverrides sets environment-specific values for the release's
-	// backends, matched by name. Today it sets an external backend's URL, so
-	// staging can call a staging service while the release stays the same.
+	// backends, matched by name: an external backend's URL, so staging can call
+	// a staging service, and a backend's weight, so each environment can run its
+	// own traffic split while the release stays the same.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -64,6 +65,15 @@ type EndpointBackendOverride struct {
 	// External overrides an external backend's URL in this environment.
 	// +optional
 	External *EndpointExternalRef `json:"external,omitempty"`
+
+	// Weight replaces the release's weight for this backend in this
+	// environment, with the same semantics: relative to the other backends'
+	// weights, and 0 sends no traffic. It changes the split without cutting a
+	// new release; status.backends reports the effective weight.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000000
+	Weight *int32 `json:"weight,omitempty"`
 }
 
 // EndpointResolvedAddress is an address a binding serves in its environment.

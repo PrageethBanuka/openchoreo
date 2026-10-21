@@ -605,6 +605,27 @@ clusterAgent:
     # @schema
     create: true
 
+    # @schema
+    # type: object
+    # description: >-
+    #   Grant the cluster agent the service mesh routing kinds that mesh
+    #   EndpointTypes render. Enable the mesh installed on this data plane.
+    # @schema
+    serviceMesh:
+      # @schema
+      # type: boolean
+      # description: Allow Istio VirtualServices and DestinationRules
+      # default: false
+      # @schema
+      istio: false
+
+      # @schema
+      # type: boolean
+      # description: Allow CiliumEnvoyConfigs
+      # default: false
+      # @schema
+      cilium: false
+
   # @schema
   # type: object
   # description: Priority class configuration for cluster agent pods

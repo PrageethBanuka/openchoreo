@@ -10,6 +10,7 @@ import (
 
 // EndpointSpec defines the desired state of Endpoint.
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.takeOver) || !has(self.takeOver) || self.takeOver == oldSelf.takeOver",message="spec.takeOver can be added or removed but not changed"
+// +kubebuilder:validation:XValidation:rule="has(self.address) == has(oldSelf.address)",message="spec.address cannot be added or removed after creation; create a new Endpoint to serve another address"
 type EndpointSpec struct {
 	// Owner identifies the Project this Endpoint belongs to.
 	// +kubebuilder:validation:Required
@@ -25,9 +26,12 @@ type EndpointSpec struct {
 	// Address is the URL this Endpoint serves: a path, on the environment's
 	// gateway host or on its own hostname. It belongs to the Endpoint, so it
 	// stays the same whatever backends answer it, and it is fixed at creation.
-	// +kubebuilder:validation:Required
+	// Required when the EndpointType's addressKind is Gateway (the default);
+	// Service types serve the taken-over component's in-cluster Service
+	// instead and must leave it unset.
+	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.address cannot be changed after creation; create a new Endpoint to serve another address"
-	Address EndpointAddress `json:"address"`
+	Address *EndpointAddress `json:"address,omitempty"`
 
 	// TakeOver optionally makes the Endpoint also serve one component workload
 	// endpoint's existing URL, so clients of that URL move to the Endpoint

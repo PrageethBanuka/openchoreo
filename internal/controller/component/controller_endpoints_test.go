@@ -72,7 +72,7 @@ func TestReconcileExposedEndpointsCreatesMissing(t *testing.T) {
 	ep := &openchoreov1alpha1.Endpoint{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "payments-v1-http"}, ep))
 	assert.Equal(t, "shop", ep.Spec.Owner.ProjectName)
-	assert.Equal(t, openchoreov1alpha1.EndpointAddress{Path: "/payments-v1-http"}, ep.Spec.Address,
+	assert.Equal(t, &openchoreov1alpha1.EndpointAddress{Path: "/payments-v1-http"}, ep.Spec.Address,
 		"the Endpoint's address is the URL path the component already serves")
 	require.NotNil(t, ep.Spec.TakeOver)
 	assert.Equal(t, openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, ep.Spec.TakeOver.Component,
@@ -303,7 +303,7 @@ func TestPruneFromEndpointsDropsTheTakeOver(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:    openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
-			Address:  openchoreov1alpha1.EndpointAddress{Path: "/payments"},
+			Address:  &openchoreov1alpha1.EndpointAddress{Path: "/payments"},
 			TakeOver: &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}},
 			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
 				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](100)},

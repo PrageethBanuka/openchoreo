@@ -50,6 +50,18 @@ spec:
               ClusterEndpointTypeSpec defines the desired state of ClusterEndpointType.
               Currently mirrors EndpointTypeSpec; may diverge as cluster-scoped concerns emerge.
             properties:
+              addressKind:
+                default: Gateway
+                description: |-
+                  AddressKind is the kind of address Endpoints of this type serve. Gateway
+                  types serve the Endpoint's own address, a host and path on a gateway.
+                  Service types serve the in-cluster Service of the component the Endpoint
+                  takes over, so callers inside the cluster keep their URL (for example a
+                  service mesh route); their Endpoints set takeOver and no address.
+                enum:
+                - Gateway
+                - Service
+                type: string
               allowedBackendKinds:
                 default:
                 - Component

@@ -56,7 +56,7 @@ var _ = Describe("EndpointRelease Controller", func() {
 								},
 							},
 						},
-						Address: openchoreov1alpha1.EndpointAddress{Path: "/test-endpoint"},
+						Address: &openchoreov1alpha1.EndpointAddress{Path: "/test-endpoint"},
 						BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
 							{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}},
 						},

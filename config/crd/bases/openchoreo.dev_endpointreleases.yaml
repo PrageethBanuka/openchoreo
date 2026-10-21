@@ -58,8 +58,9 @@ spec:
               exclusively by the Endpoint controller.
             properties:
               address:
-                description: Address is the URL the Endpoint serves, copied from the
-                  Endpoint spec.
+                description: |-
+                  Address is the URL the Endpoint serves, copied from the Endpoint spec.
+                  Unset for Endpoints of a Service-addressed type.
                 properties:
                   hostname:
                     description: |-
@@ -179,6 +180,18 @@ spec:
                       ClusterEndpointType source will lose them; revisit this field then. Mirrors
                       the ResourceReleaseResourceType precedent.
                     properties:
+                      addressKind:
+                        default: Gateway
+                        description: |-
+                          AddressKind is the kind of address Endpoints of this type serve. Gateway
+                          types serve the Endpoint's own address, a host and path on a gateway.
+                          Service types serve the in-cluster Service of the component the Endpoint
+                          takes over, so callers inside the cluster keep their URL (for example a
+                          service mesh route); their Endpoints set takeOver and no address.
+                        enum:
+                        - Gateway
+                        - Service
+                        type: string
                       allowedBackendKinds:
                         default:
                         - Component
@@ -372,7 +385,6 @@ spec:
                 - component
                 type: object
             required:
-            - address
             - backendRefs
             - endpointType
             - owner

@@ -38,6 +38,15 @@ type EndpointTypeSpec struct {
 	// +kubebuilder:default={Component}
 	AllowedBackendKinds []EndpointBackendKind `json:"allowedBackendKinds,omitempty"`
 
+	// AddressKind is the kind of address Endpoints of this type serve. Gateway
+	// types serve the Endpoint's own address, a host and path on a gateway.
+	// Service types serve the in-cluster Service of the component the Endpoint
+	// takes over, so callers inside the cluster keep their URL (for example a
+	// service mesh route); their Endpoints set takeOver and no address.
+	// +optional
+	// +kubebuilder:default=Gateway
+	AddressKind EndpointAddressKind `json:"addressKind,omitempty"`
+
 	// Resources are the routing manifests (e.g. HTTPRoute, Ingress,
 	// CiliumEnvoyConfig) the EndpointType emits on the data plane for each
 	// EndpointReleaseBinding. Uses the same templating engine as ComponentType.
@@ -49,6 +58,23 @@ type EndpointTypeSpec struct {
 	// +listType=map
 	// +listMapKey=id
 	Resources []ResourceTemplate `json:"resources"`
+}
+
+// EndpointAddressKind is the kind of address an EndpointType serves.
+// +kubebuilder:validation:Enum=Gateway;Service
+type EndpointAddressKind string
+
+const (
+	// EndpointAddressKindGateway serves the Endpoint's own host and path on a gateway.
+	EndpointAddressKindGateway EndpointAddressKind = "Gateway"
+	// EndpointAddressKindService serves the taken-over component's in-cluster Service.
+	EndpointAddressKindService EndpointAddressKind = "Service"
+)
+
+// ServesService reports whether the type serves an in-cluster Service rather
+// than a gateway address. An unset kind means Gateway.
+func (s *EndpointTypeSpec) ServesService() bool {
+	return s.AddressKind == EndpointAddressKindService
 }
 
 // EndpointTypeStatus defines the observed state of EndpointType.

@@ -106,7 +106,7 @@ func (r *Reconciler) createExposedEndpoint(ctx context.Context, comp *openchoreo
 			// The address is the URL the component already serves for this
 			// endpoint, and the take-over moves that URL to the Endpoint, so
 			// clients keep calling the same URL.
-			Address: openchoreov1alpha1.EndpointAddress{Path: "/" + comp.Name + "-" + key},
+			Address: &openchoreov1alpha1.EndpointAddress{Path: "/" + comp.Name + "-" + key},
 			TakeOver: &openchoreov1alpha1.EndpointTakeOver{
 				Component: openchoreov1alpha1.EndpointComponentRef{Name: comp.Name, Endpoint: key},
 			},

@@ -219,7 +219,9 @@ func validateInput(input *RenderInput) error {
 	if len(input.Backends) == 0 {
 		return fmt.Errorf("input.Backends is empty")
 	}
-	if input.Address.Host == "" || input.Address.Path == "" {
+	// Service-addressed types serve the taken-over component's in-cluster
+	// Service and have no address of their own.
+	if !input.EndpointTypeSpec.ServesService() && (input.Address.Host == "" || input.Address.Path == "") {
 		return fmt.Errorf("input.Address is unset")
 	}
 	return nil
@@ -261,7 +263,10 @@ func buildBaseContext(input *RenderInput) (map[string]any, error) {
 	})
 }
 
-// extractAndDefault unmarshals raw into a map and overlays schema defaults.
+// extractAndDefault unmarshals raw into a map, overlays schema defaults and
+// validates the result against the schema. The Endpoint webhook checks
+// parameters at admission; this also catches values that a later change to the
+// type, or a bypassed webhook, left out of line with the schema.
 func extractAndDefault(raw *runtime.RawExtension, section *v1alpha1.SchemaSection) (map[string]any, error) {
 	target := map[string]any{}
 	if raw != nil && len(raw.Raw) > 0 {
@@ -279,7 +284,15 @@ func extractAndDefault(raw *runtime.RawExtension, section *v1alpha1.SchemaSectio
 	if structural == nil {
 		return target, nil
 	}
-	return schema.ApplyDefaults(target, structural), nil
+	target = schema.ApplyDefaults(target, structural)
+	jsonSchema, err := schema.SectionToJSONSchema(section)
+	if err != nil {
+		return nil, err
+	}
+	if err := schema.ValidateWithJSONSchema(target, jsonSchema); err != nil {
+		return nil, err
+	}
+	return target, nil
 }
 
 // structToMap converts typed Go structs to map[string]any for CEL evaluation

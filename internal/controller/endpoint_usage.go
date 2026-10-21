@@ -303,9 +303,11 @@ func EndpointComponentNames(ep *openchoreov1alpha1.Endpoint) []string {
 // SameEndpointAddress reports whether two Endpoints claim the same address.
 // An address on the environment's gateway host (no hostname) shares that host
 // with every project in the namespace, so those compare within a namespace; an
-// address with its own hostname compares across namespaces.
+// address with its own hostname compares across namespaces. An Endpoint without
+// an address (a Service-addressed type) claims none.
 func SameEndpointAddress(a, b *openchoreov1alpha1.Endpoint) bool {
-	if a.Spec.Address.Path == "" || a.Spec.Address != b.Spec.Address {
+	if a.Spec.Address == nil || b.Spec.Address == nil ||
+		a.Spec.Address.Path == "" || *a.Spec.Address != *b.Spec.Address {
 		return false
 	}
 	return a.Spec.Address.Hostname != "" || a.Namespace == b.Namespace
