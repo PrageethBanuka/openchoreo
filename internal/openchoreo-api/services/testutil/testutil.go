@@ -415,9 +415,10 @@ func NewEndpoint(namespace, projectName, name string) *openchoreov1alpha1.Endpoi
 				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
 				Name: "http-weighted",
 			},
+			Address: openchoreov1alpha1.EndpointAddress{Path: "/" + name},
 			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](90)},
-				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](10)},
+				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](90)},
+				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](10)},
 			},
 		},
 	}
@@ -440,8 +441,9 @@ func NewEndpointRelease(namespace, projectName, endpointName, name string) *open
 				Name: "http-weighted",
 				Spec: defaultEndpointTypeSpec(),
 			},
+			Address: openchoreov1alpha1.EndpointAddress{Path: "/" + endpointName},
 			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](100)},
+				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](100)},
 			},
 		},
 	}

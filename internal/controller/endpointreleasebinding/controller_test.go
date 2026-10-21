@@ -76,7 +76,13 @@ func weightedRouteSpec() openchoreov1alpha1.EndpointTypeSpec {
 	}
 }
 
+// newRelease builds a release at address /pay that takes over its first
+// backend's URL, so the claim tests have a component route to suppress.
 func newRelease(name string, refs ...openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.EndpointRelease {
+	var takeOver *openchoreov1alpha1.EndpointTakeOver
+	if len(refs) > 0 && refs[0].Component != nil {
+		takeOver = &openchoreov1alpha1.EndpointTakeOver{Component: *refs[0].Component}
+	}
 	return &openchoreov1alpha1.EndpointRelease{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointReleaseSpec{
@@ -86,6 +92,8 @@ func newRelease(name string, refs ...openchoreov1alpha1.EndpointBackendRef) *ope
 				Name: "http-weighted",
 				Spec: weightedRouteSpec(),
 			},
+			Address:     openchoreov1alpha1.EndpointAddress{Path: "/pay"},
+			TakeOver:    takeOver,
 			BackendRefs: refs,
 		},
 	}
@@ -269,8 +277,8 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 	}
 
 	refs := []openchoreov1alpha1.EndpointBackendRef{
-		{ComponentName: "payments-v1", Endpoint: "api", Weight: ptr.To[int32](90)},
-		{ComponentName: "payments-v2", Endpoint: "api", Weight: ptr.To[int32](10)},
+		{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}, Weight: ptr.To[int32](90)},
+		{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "api"}, Weight: ptr.To[int32](10)},
 	}
 
 	It("renders a weighted HTTPRoute, reports backends and URLs, and becomes Ready once the route is healthy", func() {
@@ -314,6 +322,96 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		b = reconcileBinding()
 		Expect(condition(b, string(ConditionRoutesReady)).Status).To(Equal(metav1.ConditionTrue))
 		Expect(condition(b, string(ConditionReady)).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("resolves the Endpoint's address on the environment host and records it", func() {
+		setup(newRelease("rel-1", refs...), newBinding("rel-1"),
+			componentBinding("payments-v1"), componentBinding("payments-v2"))
+		b := reconcileBinding()
+		Expect(b.Status.Addresses).To(ContainElement(openchoreov1alpha1.EndpointResolvedAddress{
+			Kind: "Address", Host: testEnvName + "-" + testNS + ".openchoreoapis.localhost", Path: "/pay",
+		}))
+	})
+
+	It("uses a per-environment hostname only when the type allows it", func() {
+		rel := newRelease("rel-1", refs...)
+		rel.Spec.EndpointType.Spec.AllowedHostnames = []string{"*.example.com"}
+		binding := newBinding("rel-1")
+		binding.Spec.Hostname = "payments.example.com"
+		setup(rel, binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+		b := reconcileBinding()
+		Expect(b.Status.Addresses[0]).To(Equal(openchoreov1alpha1.EndpointResolvedAddress{
+			Kind: "Address", Host: "payments.example.com", Path: "/pay",
+		}))
+
+		disallowed := newBinding("rel-1")
+		disallowed.Spec.Hostname = "payments.other.org"
+		setup(rel.DeepCopy(), disallowed, componentBinding("payments-v1"), componentBinding("payments-v2"))
+		b = reconcileBinding()
+		Expect(condition(b, string(ConditionSynced)).Reason).To(Equal(string(ReasonAddressInvalid)))
+		Expect(condition(b, string(ConditionSynced)).Message).To(ContainSubstring("not allowed"))
+	})
+
+	It("routes to an external backend, using the environment's override when set", func() {
+		rel := newRelease("rel-1", refs[0], openchoreov1alpha1.EndpointBackendRef{
+			Name: "legacy", External: &openchoreov1alpha1.EndpointExternalRef{URL: "https://legacy.example.com"}, Weight: ptr.To[int32](10),
+		})
+		binding := newBinding("rel-1")
+		binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{{
+			Name: "legacy", External: &openchoreov1alpha1.EndpointExternalRef{URL: "http://legacy.dev.example.com:8080"},
+		}}
+		setup(rel, binding, componentBinding("payments-v1"))
+		b := reconcileBinding()
+		Expect(condition(b, string(ConditionBackendsResolved)).Status).To(Equal(metav1.ConditionTrue))
+		var legacy *openchoreov1alpha1.ResolvedEndpointBackend
+		for i := range b.Status.Backends {
+			if b.Status.Backends[i].Name == "legacy" {
+				legacy = &b.Status.Backends[i]
+			}
+		}
+		Expect(legacy).NotTo(BeNil())
+		Expect(legacy.Resolved).To(BeTrue())
+		Expect(legacy.ExternalURL).To(Equal("http://legacy.dev.example.com:8080"))
+	})
+
+	It("holds back a binding whose address an older binding already serves", func() {
+		older := newBinding("rel-1")
+		older.Name = "other-api-" + testEnvName
+		older.Spec.Owner.EndpointName = "other-api"
+		older.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
+		older.Status.Addresses = []openchoreov1alpha1.EndpointResolvedAddress{{
+			Kind: "Address", Host: testEnvName + "-" + testNS + ".openchoreoapis.localhost", Path: "/pay",
+		}}
+		binding := newBinding("rel-1")
+		binding.CreationTimestamp = metav1.Now()
+		setup(newRelease("rel-1", refs...), older, binding,
+			componentBinding("payments-v1"), componentBinding("payments-v2"))
+		b := reconcileBinding()
+		Expect(condition(b, string(ConditionSynced)).Reason).To(Equal(string(ReasonAddressInUse)))
+		Expect(condition(b, string(ConditionSynced)).Message).To(ContainSubstring("other-api"))
+	})
+
+	It("refuses an address that is a component's own route path, unless it takes that route over", func() {
+		comp := componentBinding("payments-v3")
+		comp.Status.Endpoints[0].ExternalURLs = &openchoreov1alpha1.EndpointGatewayURLs{
+			HTTP: &openchoreov1alpha1.EndpointURL{Host: testEnvName + "-" + testNS + ".openchoreoapis.localhost", Path: "/pay"},
+		}
+		setup(newRelease("rel-1", refs...), newBinding("rel-1"),
+			componentBinding("payments-v1"), componentBinding("payments-v2"), comp)
+		b := reconcileBinding()
+		Expect(condition(b, string(ConditionSynced)).Reason).To(Equal(string(ReasonAddressInUse)))
+		Expect(condition(b, string(ConditionSynced)).Message).To(ContainSubstring("component payments-v3"))
+	})
+
+	It("serves its own address while the take-over component is not deployed here", func() {
+		rel := newRelease("rel-1", refs[1])
+		rel.Spec.TakeOver = &openchoreov1alpha1.EndpointTakeOver{
+			Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-legacy", Endpoint: "api"},
+		}
+		setup(rel, newBinding("rel-1"), componentBinding("payments-v2"))
+		b := reconcileBinding()
+		Expect(condition(b, string(ConditionTakeOver)).Reason).To(Equal(string(ReasonTakeOverPending)))
+		Expect(getRenderedRelease(b)).NotTo(BeNil(), "the Endpoint's own address still renders")
 	})
 
 	It("passes each backend's own address and base path to the template", func() {
@@ -403,8 +501,8 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 
 	It("does not block on an undeployed backend staged at weight 0", func() {
 		setup(newRelease("rel-1",
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "payments-v1", Endpoint: "api", Weight: ptr.To[int32](100)},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "payments-v2", Endpoint: "api", Weight: ptr.To[int32](0)},
+			openchoreov1alpha1.EndpointBackendRef{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}, Weight: ptr.To[int32](100)},
+			openchoreov1alpha1.EndpointBackendRef{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "api"}, Weight: ptr.To[int32](0)},
 		), newBinding("rel-1"), componentBinding("payments-v1"))
 
 		b := reconcileBinding()
@@ -414,7 +512,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 	})
 
 	It("reports an endpoint that the component does not expose", func() {
-		setup(newRelease("rel-1", openchoreov1alpha1.EndpointBackendRef{ComponentName: "payments-v1", Endpoint: "admin"}),
+		setup(newRelease("rel-1", openchoreov1alpha1.EndpointBackendRef{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "admin"}}),
 			newBinding("rel-1"), componentBinding("payments-v1"))
 
 		b := reconcileBinding()
@@ -465,7 +563,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 			Spec: openchoreov1alpha1.EndpointSpec{
 				Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: testProject},
 				Type:        openchoreov1alpha1.EndpointTypeRef{Name: "http-weighted"},
-				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "api"}},
+				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}}},
 			},
 		}
 		devBinding := newBinding("")
@@ -483,9 +581,8 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 	})
 
 	Context("serving claim", func() {
-		slot := func(component string) openchoreov1alpha1.EndpointBackendSlot {
-			return openchoreov1alpha1.EndpointBackendSlot{ComponentName: component, Endpoint: "api"}
-		}
+		// v1URL is the claim's slot: the releases serve payments-v1's URL.
+		v1URL := openchoreov1alpha1.EndpointBackendSlot{ComponentName: "payments-v1", Endpoint: "api"}
 
 		// claimFor reconciles the binding to an applied, healthy route and returns it.
 		claimFor := func() *openchoreov1alpha1.EndpointReleaseBinding {
@@ -549,7 +646,8 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 			b = claimFor()
 			Expect(b.Status.Serving).NotTo(BeNil())
 			Expect(b.Status.Serving.EndpointRelease).To(Equal("rel-1"))
-			Expect(b.Status.Serving.Backends).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1"), slot("payments-v2")}))
+			Expect(b.Status.Serving.URLs).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{v1URL}),
+				"the claim covers the served URL only; payments-v2 keeps its own")
 			Expect(b.Status.Serving.Visibilities).To(Equal([]openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal}))
 			Expect(b.Status.Serving.Releasing).To(BeFalse())
 		})
@@ -559,7 +657,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 				componentBinding("payments-v1"))
 
 			b := claimFor()
-			Expect(b.Status.Serving.Backends).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1")}))
+			Expect(b.Status.Serving.URLs).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{v1URL}))
 			since := b.Status.Serving.Since
 
 			By("pinning rel-2 while payments-v2 is missing keeps the rel-1 claim")
@@ -578,7 +676,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 			markApplied(getRenderedRelease(b), openchoreov1alpha1.HealthStatusHealthy)
 			b = reconcileBinding()
 			Expect(b.Status.Serving.EndpointRelease).To(Equal("rel-2"))
-			Expect(b.Status.Serving.Backends).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1"), slot("payments-v2")}))
+			Expect(b.Status.Serving.URLs).To(Equal([]openchoreov1alpha1.EndpointBackendSlot{v1URL}))
 			Expect(b.Status.Serving.Since).To(Equal(since))
 		})
 
@@ -636,7 +734,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 			b.Status.Conditions = []metav1.Condition{NewFinalizingCondition(0)}
 			b.Status.Serving = &openchoreov1alpha1.EndpointServingClaim{
 				EndpointRelease: "rel-1",
-				Backends:        []openchoreov1alpha1.EndpointBackendSlot{slot("payments-v1")},
+				URLs:            []openchoreov1alpha1.EndpointBackendSlot{v1URL},
 				Visibilities:    []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal},
 				Since:           metav1.Now(),
 				Releasing:       true,

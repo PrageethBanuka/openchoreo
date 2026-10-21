@@ -8157,8 +8157,11 @@ components:
           example: payments-api
         endpoint:
           type: string
-          description: Workload endpoint of the component the Endpoint routes to
+          description: Workload endpoint of the component the Endpoint routes to or serves the URL of
           example: http
+        servesURL:
+          type: boolean
+          description: True when the Endpoint serves this workload endpoint's URL
         environments:
           type: array
           description: Weight of this component in the release pinned in each environment where the Endpoint is bound
@@ -11802,6 +11805,18 @@ components:
           description: CEL-based validation rules evaluated before rendering
           items:
             $ref: '#/components/schemas/ValidationRule'
+        allowedHostnames:
+          type: array
+          description: Hostnames Endpoints of this type may use as their own; a leading "*." matches one label. Empty means the environment's gateway host only.
+          items:
+            type: string
+            example: '*.example.com'
+        allowedBackendKinds:
+          type: array
+          description: Backend kinds Endpoints of this type may use. External must be allowed explicitly.
+          items:
+            type: string
+            enum: [Component, External]
         resources:
           type: array
           description: Routing manifests (e.g. HTTPRoute, GRPCRoute, VirtualService) emitted on the data plane for each EndpointReleaseBinding.
@@ -11910,16 +11925,32 @@ components:
           pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
           example: http-weighted
 
-    EndpointBackendRef:
+    EndpointAddress:
       type: object
-      description: A component workload endpoint the Endpoint routes traffic to, with its relative weight.
+      description: The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
       required:
-        - componentName
+        - path
+      properties:
+        path:
+          type: string
+          description: Path prefix clients call
+          pattern: '^/[a-z0-9]([-a-z0-9/._]*[a-z0-9])?$'
+          example: /payments
+        hostname:
+          type: string
+          description: The Endpoint's own hostname, allowed by its type. Unset means the environment's gateway host.
+          example: payments.example.com
+
+    EndpointComponentRef:
+      type: object
+      description: A workload endpoint of a component in the Endpoint's project.
+      required:
+        - name
         - endpoint
       properties:
-        componentName:
+        name:
           type: string
-          description: Component in the Endpoint's project that serves this backend
+          description: Component name
           minLength: 1
           pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
           example: payments-v1
@@ -11928,6 +11959,44 @@ components:
           description: Name of the endpoint in the component's Workload.spec.endpoints
           minLength: 1
           example: http
+
+    EndpointTakeOver:
+      type: object
+      description: |
+        A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
+        to the Endpoint without a gap. Can be added or removed, not changed.
+      required:
+        - component
+      properties:
+        component:
+          $ref: '#/components/schemas/EndpointComponentRef'
+
+    EndpointExternalRef:
+      type: object
+      description: A service outside OpenChoreo.
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          description: Base URL of the service, http(s)://host[:port]
+          example: https://legacy.example.com
+
+    EndpointBackendRef:
+      type: object
+      description: One backend of an Endpoint, a component workload endpoint or an external service, with its relative weight.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Identifies the backend within the Endpoint; per-environment overrides refer to it
+          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          example: payments-v1
+        component:
+          $ref: '#/components/schemas/EndpointComponentRef'
+        external:
+          $ref: '#/components/schemas/EndpointExternalRef'
         weight:
           type: integer
           format: int32
@@ -11981,10 +12050,11 @@ components:
 
     EndpointSpec:
       type: object
-      description: Desired state of an Endpoint. spec.owner and spec.type are immutable after creation.
+      description: Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed.
       required:
         - owner
         - type
+        - address
       properties:
         owner:
           type: object
@@ -11999,6 +12069,10 @@ components:
               example: shop
         type:
           $ref: '#/components/schemas/EndpointTypeRef'
+        address:
+          $ref: '#/components/schemas/EndpointAddress'
+        takeOver:
+          $ref: '#/components/schemas/EndpointTakeOver'
         backendRefs:
           type: array
           description: Component workload endpoints receiving traffic, with relative weights. May be empty; see reclaimPolicy.
@@ -12098,6 +12172,10 @@ components:
       properties:
         owner:
           $ref: '#/components/schemas/EndpointReleaseOwner'
+        address:
+          $ref: '#/components/schemas/EndpointAddress'
+        takeOver:
+          $ref: '#/components/schemas/EndpointTakeOver'
         endpointType:
           type: object
           description: Frozen snapshot of the referenced (Cluster)EndpointType.
@@ -12212,15 +12290,53 @@ components:
           type: object
           description: Per-environment values for (Cluster)EndpointType.spec.environmentConfigs.
           additionalProperties: true
+        hostname:
+          type: string
+          description: Overrides the Endpoint's address.hostname in this environment
+          example: payments.staging.example.com
+        backendOverrides:
+          type: array
+          description: Environment-specific values for the release's backends, matched by name
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+                example: legacy
+              external:
+                $ref: '#/components/schemas/EndpointExternalRef'
+
+    EndpointResolvedAddress:
+      type: object
+      description: A host and path a binding serves in its environment.
+      required: [kind, host, path]
+      properties:
+        kind:
+          type: string
+          enum: [Address, TakeOver]
+        host:
+          type: string
+          example: development-default.openchoreoapis.localhost
+        path:
+          type: string
+          example: /payments
 
     ResolvedEndpointBackend:
       type: object
       description: Resolution of one backendRef in the binding's environment.
       required:
-        - componentName
-        - endpoint
+        - name
         - resolved
       properties:
+        name:
+          type: string
+          description: Backend name in the release
+          example: payments-v1
+        externalURL:
+          type: string
+          description: URL used in this environment, for an external backend
+          example: https://legacy.staging.example.com
         componentName:
           type: string
           description: Backend component name
@@ -12273,9 +12389,9 @@ components:
           type: string
           description: Release whose rendered routes were accepted
           example: payments-api-5b7fc7b
-        backends:
+        urls:
           type: array
-          description: Component workload endpoints receiving traffic (non-zero weight) through the accepted routes
+          description: Component workload endpoints whose URLs the accepted routes take over (the Endpoint's spec.takeOver)
           items:
             $ref: '#/components/schemas/EndpointBackendSlot'
         visibilities:
@@ -12316,6 +12432,11 @@ components:
           $ref: '#/components/schemas/EndpointGatewayURLs'
         serving:
           $ref: '#/components/schemas/EndpointServingClaim'
+        addresses:
+          type: array
+          description: Host and path pairs this binding serves in its environment
+          items:
+            $ref: '#/components/schemas/EndpointResolvedAddress'
 
     # -------------------------------------------------------------------------
     # RenderedRelease

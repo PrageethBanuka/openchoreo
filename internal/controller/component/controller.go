@@ -50,7 +50,7 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=workflowruns,verbs=list;delete
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=deploymentpipelines,verbs=get;list;watch
-// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpoints,verbs=get;list;watch;create;patch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpoints,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointtypes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=clusterendpointtypes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleases,verbs=get;list;watch

@@ -67,6 +67,15 @@ type RenderInput struct {
 	// to CEL as ${backends}. Required to be non-empty.
 	Backends []Backend
 
+	// Address is the Endpoint's own address in this environment, exposed to
+	// CEL as ${address}. Required.
+	Address AddressContext
+
+	// TakeOver is the component URL the Endpoint also serves, exposed to CEL
+	// as ${takeOver}. Nil when the Endpoint takes nothing over, or when the
+	// component is not deployed in this environment.
+	TakeOver *URLContext
+
 	// Metadata is the controller-computed metadata surface exposed to CEL as
 	// ${metadata.*}.
 	Metadata MetadataContext
@@ -80,13 +89,23 @@ type RenderInput struct {
 }
 
 // Backend is one resolved traffic backend: a workload endpoint of a component
-// deployed in the binding's environment.
+// deployed in the binding's environment, or an external service.
 type Backend struct {
-	// ComponentName is the backend Component.
-	ComponentName string `json:"componentName"`
+	// Name identifies the backend within the Endpoint.
+	Name string `json:"name"`
 
-	// Endpoint is the workload endpoint name on the Component.
-	Endpoint string `json:"endpoint"`
+	// Kind is Component or External.
+	Kind string `json:"kind"`
+
+	// ComponentName is the backend Component, for a component backend.
+	ComponentName string `json:"componentName,omitempty"`
+
+	// Endpoint is the workload endpoint name on the Component, for a component
+	// backend.
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// External is the service an external backend calls in this environment.
+	External *ExternalBackend `json:"external,omitempty"`
 
 	// Protocol is the workload endpoint protocol (HTTP, gRPC, ...).
 	Protocol string `json:"protocol"`
@@ -113,6 +132,48 @@ type Backend struct {
 	// endpoint, those routes are not rendered, so an EndpointType serves these
 	// addresses itself to keep clients of the old URLs working.
 	ComponentURLs ComponentURLs `json:"componentURLs"`
+}
+
+// AddressContext is the Endpoint's own address in one environment.
+type AddressContext struct {
+	// Host is the hostname clients call: the Endpoint's own hostname, or the
+	// environment's external gateway host.
+	Host string `json:"host"`
+
+	// Path is the path prefix clients call.
+	Path string `json:"path"`
+
+	// OwnHostname is true when Host is the Endpoint's own hostname rather than
+	// the environment's gateway host.
+	OwnHostname bool `json:"ownHostname"`
+}
+
+// URLContext is a component URL an Endpoint takes over: the address that
+// component serves today for that workload endpoint, per visibility. A
+// visibility the component does not expose is omitted.
+type URLContext struct {
+	// ComponentName and Endpoint name the workload endpoint whose URL is served.
+	ComponentName string `json:"componentName"`
+	Endpoint      string `json:"endpoint"`
+
+	// BasePath is that workload endpoint's base path ("/" when unset).
+	// Templates rewrite the served path prefix to it.
+	BasePath string `json:"basePath"`
+
+	External *Address `json:"external,omitempty"`
+	Internal *Address `json:"internal,omitempty"`
+}
+
+// ExternalBackend is where an external backend sends traffic.
+type ExternalBackend struct {
+	// Scheme is http or https.
+	Scheme string `json:"scheme"`
+	// Host is the service's hostname; templates also send it as the Host header.
+	Host string `json:"host"`
+	// Port is the service's port, defaulted from the scheme.
+	Port int32 `json:"port"`
+	// URL is the full URL as configured.
+	URL string `json:"url"`
 }
 
 // ComponentURLs are a backend component's own gateway addresses, per
@@ -178,6 +239,8 @@ type BaseContext struct {
 	Parameters         map[string]any     `json:"parameters"`
 	EnvironmentConfigs map[string]any     `json:"environmentConfigs"`
 	Backends           []Backend          `json:"backends"`
+	Address            AddressContext     `json:"address"`
+	TakeOver           *URLContext        `json:"takeOver"`
 	DataPlane          DataPlaneContext   `json:"dataplane"`
 	Environment        EnvironmentContext `json:"environment"`
 	// Gateway is the effective gateway exposed at the top level for terseness;

@@ -250,13 +250,8 @@ func (s *componentService) DeleteComponent(ctx context.Context, namespaceName, c
 		return fmt.Errorf("failed to check endpoint traffic: %w", err)
 	}
 	if routed := controller.RoutedEndpointUsage(usages); len(routed) > 0 {
-		parts := make([]string, 0, len(routed))
-		for _, u := range routed {
-			parts = append(parts, fmt.Sprintf("%s in %s (weight %d)", u.Endpoint, u.Environment, u.Weight))
-		}
-		return &StillRoutedError{Message: fmt.Sprintf(
-			"component %q still receives traffic through %s; move its weight to 0 and roll out before deleting",
-			componentName, strings.Join(parts, ", "))}
+		return &StillRoutedError{Message: fmt.Sprintf("component %q still %s",
+			componentName, controller.StillRoutedReason(routed))}
 	}
 
 	if err := s.k8sClient.Delete(ctx, component); err != nil {

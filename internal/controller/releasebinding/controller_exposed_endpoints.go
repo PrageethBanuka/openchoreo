@@ -72,7 +72,7 @@ func (r *Reconciler) ensureExposedEndpointBindings(ctx context.Context, rb *open
 			}
 			return fmt.Errorf("get endpoint %s: %w", name, err)
 		}
-		if ep.Spec.Owner.ProjectName != project || !controller.HasEndpointBackend(ep, component, key) ||
+		if ep.Spec.Owner.ProjectName != project || !controller.ServesEndpointURL(ep, component, key) ||
 			ep.Status.LatestRelease == nil || !ep.DeletionTimestamp.IsZero() {
 			continue
 		}
@@ -104,23 +104,19 @@ func (r *Reconciler) ensureExposedEndpointBindings(ctx context.Context, rb *open
 	return nil
 }
 
-// findReleaseBindingsForEndpoint maps an Endpoint to the ReleaseBindings of its
-// backend components, so a newly created (or newly released) Endpoint gets its
-// bindings in the environments those components are deployed to.
+// findReleaseBindingsForEndpoint maps an Endpoint to the ReleaseBindings of the
+// components it references (its backends and the component whose URL it
+// serves), so a newly created (or newly released) Endpoint gets its bindings
+// in the environments those components are deployed to.
 func (r *Reconciler) findReleaseBindingsForEndpoint(ctx context.Context, obj client.Object) []reconcile.Request {
 	ep := obj.(*openchoreov1alpha1.Endpoint)
-	seen := map[string]bool{}
 	var reqs []reconcile.Request
-	for _, ref := range ep.Spec.BackendRefs {
-		if seen[ref.ComponentName] {
-			continue
-		}
-		seen[ref.ComponentName] = true
+	for _, name := range controller.EndpointComponentNames(ep) {
 		var rbs openchoreov1alpha1.ReleaseBindingList
 		if err := r.List(ctx, &rbs, client.InNamespace(ep.Namespace),
-			client.MatchingFields{controller.IndexKeyReleaseBindingOwnerComponentName: ref.ComponentName}); err != nil {
-			log.FromContext(ctx).Error(err, "Failed to list ReleaseBindings for Endpoint backend",
-				"endpoint", ep.Name, "component", ref.ComponentName)
+			client.MatchingFields{controller.IndexKeyReleaseBindingOwnerComponentName: name}); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to list ReleaseBindings for Endpoint component",
+				"endpoint", ep.Name, "component", name)
 			continue
 		}
 		for i := range rbs.Items {

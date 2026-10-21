@@ -162,9 +162,9 @@ func TestIndexEndpointBackendComponent(t *testing.T) {
 			Spec: openchoreov1alpha1.EndpointSpec{
 				Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
 				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-					{ComponentName: "payments-v1", Endpoint: "api"},
-					{ComponentName: "payments-v2", Endpoint: "api"},
-					{ComponentName: "payments-v1", Endpoint: "admin"},
+					{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}},
+					{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "api"}},
+					{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "admin"}},
 				},
 			},
 		}
@@ -175,7 +175,7 @@ func TestIndexEndpointBackendComponent(t *testing.T) {
 	t.Run("empty_project_returns_nil", func(t *testing.T) {
 		ep := &openchoreov1alpha1.Endpoint{
 			Spec: openchoreov1alpha1.EndpointSpec{
-				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "api"}},
+				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}}},
 			},
 		}
 		assert.Nil(t, IndexEndpointBackendComponent(ep))

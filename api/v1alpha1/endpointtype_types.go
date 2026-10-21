@@ -25,6 +25,19 @@ type EndpointTypeSpec struct {
 	// +optional
 	Validations []ValidationRule `json:"validations,omitempty"`
 
+	// AllowedHostnames lists the hostnames Endpoints of this type may use as
+	// their own hostname. A leading "*." matches any one label, for example
+	// "*.example.com". Empty means Endpoints use the environment's gateway host.
+	// +optional
+	AllowedHostnames []string `json:"allowedHostnames,omitempty"`
+
+	// AllowedBackendKinds lists the backend kinds Endpoints of this type may use.
+	// External backends send traffic outside the cluster, so they must be
+	// allowed explicitly.
+	// +optional
+	// +kubebuilder:default={Component}
+	AllowedBackendKinds []EndpointBackendKind `json:"allowedBackendKinds,omitempty"`
+
 	// Resources are the routing manifests (e.g. HTTPRoute, Ingress,
 	// CiliumEnvoyConfig) the EndpointType emits on the data plane for each
 	// EndpointReleaseBinding. Uses the same templating engine as ComponentType.

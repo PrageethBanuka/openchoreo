@@ -194,6 +194,12 @@ const (
 	EndpointReleaseSpecEndpointTypeKindEndpointType        EndpointReleaseSpecEndpointTypeKind = "EndpointType"
 )
 
+// Defines values for EndpointResolvedAddressKind.
+const (
+	Address  EndpointResolvedAddressKind = "Address"
+	TakeOver EndpointResolvedAddressKind = "TakeOver"
+)
+
 // Defines values for EndpointRouteOwnerVisibilities.
 const (
 	EndpointRouteOwnerVisibilitiesExternal  EndpointRouteOwnerVisibilities = "external"
@@ -226,6 +232,12 @@ const (
 const (
 	EndpointTypeResourceTargetPlaneDataplane          EndpointTypeResourceTargetPlane = "dataplane"
 	EndpointTypeResourceTargetPlaneObservabilityplane EndpointTypeResourceTargetPlane = "observabilityplane"
+)
+
+// Defines values for EndpointTypeSpecAllowedBackendKinds.
+const (
+	EndpointTypeSpecAllowedBackendKindsComponent EndpointTypeSpecAllowedBackendKinds = "Component"
+	EndpointTypeSpecAllowedBackendKindsExternal  EndpointTypeSpecAllowedBackendKinds = "External"
 )
 
 // Defines values for EndpointURLStatusType.
@@ -1441,7 +1453,7 @@ type Component struct {
 
 // ComponentEndpointRef An Endpoint that routes to a component's workload endpoint.
 type ComponentEndpointRef struct {
-	// Endpoint Workload endpoint of the component the Endpoint routes to
+	// Endpoint Workload endpoint of the component the Endpoint routes to or serves the URL of
 	Endpoint string `json:"endpoint"`
 
 	// Environments Weight of this component in the release pinned in each environment where the Endpoint is bound
@@ -1452,6 +1464,9 @@ type ComponentEndpointRef struct {
 
 	// Name Endpoint name
 	Name string `json:"name"`
+
+	// ServesURL True when the Endpoint serves this workload endpoint's URL
+	ServesURL *bool `json:"servesURL,omitempty"`
 }
 
 // ComponentList Paginated list of components
@@ -2059,18 +2074,30 @@ type Endpoint struct {
 	// Matches the structure of metav1.ObjectMeta for the fields exposed via the API.
 	Metadata ObjectMeta `json:"metadata"`
 
-	// Spec Desired state of an Endpoint. spec.owner and spec.type are immutable after creation.
+	// Spec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed.
 	Spec   *EndpointSpec   `json:"spec,omitempty"`
 	Status *EndpointStatus `json:"status,omitempty"`
 }
 
-// EndpointBackendRef A component workload endpoint the Endpoint routes traffic to, with its relative weight.
-type EndpointBackendRef struct {
-	// ComponentName Component in the Endpoint's project that serves this backend
-	ComponentName string `json:"componentName"`
+// EndpointAddress The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
+type EndpointAddress struct {
+	// Hostname The Endpoint's own hostname, allowed by its type. Unset means the environment's gateway host.
+	Hostname *string `json:"hostname,omitempty"`
 
-	// Endpoint Name of the endpoint in the component's Workload.spec.endpoints
-	Endpoint string `json:"endpoint"`
+	// Path Path prefix clients call
+	Path string `json:"path"`
+}
+
+// EndpointBackendRef One backend of an Endpoint, a component workload endpoint or an external service, with its relative weight.
+type EndpointBackendRef struct {
+	// Component A workload endpoint of a component in the Endpoint's project.
+	Component *EndpointComponentRef `json:"component,omitempty"`
+
+	// External A service outside OpenChoreo.
+	External *EndpointExternalRef `json:"external,omitempty"`
+
+	// Name Identifies the backend within the Endpoint; per-environment overrides refer to it
+	Name string `json:"name"`
 
 	// Weight Share of traffic relative to the sum of all weights (Gateway API semantics). 0 sends no traffic.
 	Weight *int32 `json:"weight,omitempty"`
@@ -2083,6 +2110,21 @@ type EndpointBackendSlot struct {
 
 	// Endpoint Workload endpoint name
 	Endpoint string `json:"endpoint"`
+}
+
+// EndpointComponentRef A workload endpoint of a component in the Endpoint's project.
+type EndpointComponentRef struct {
+	// Endpoint Name of the endpoint in the component's Workload.spec.endpoints
+	Endpoint string `json:"endpoint"`
+
+	// Name Component name
+	Name string `json:"name"`
+}
+
+// EndpointExternalRef A service outside OpenChoreo.
+type EndpointExternalRef struct {
+	// Url Base URL of the service, http(s)://host[:port]
+	Url string `json:"url"`
 }
 
 // EndpointGatewayURLs Resolved gateway URLs for an endpoint
@@ -2159,6 +2201,13 @@ type EndpointReleaseBindingList struct {
 // EndpointReleaseBindingSpec Desired state of an EndpointReleaseBinding. spec.owner and spec.environment are
 // immutable after creation. spec.endpointRelease is the promote pin.
 type EndpointReleaseBindingSpec struct {
+	// BackendOverrides Environment-specific values for the release's backends, matched by name
+	BackendOverrides *[]struct {
+		// External A service outside OpenChoreo.
+		External *EndpointExternalRef `json:"external,omitempty"`
+		Name     string               `json:"name"`
+	} `json:"backendOverrides,omitempty"`
+
 	// EndpointRelease Pinned EndpointRelease name. The binding stays pending until it is set.
 	EndpointRelease *string `json:"endpointRelease,omitempty"`
 
@@ -2168,12 +2217,18 @@ type EndpointReleaseBindingSpec struct {
 	// Environment Target environment name. Immutable after creation.
 	Environment string `json:"environment"`
 
+	// Hostname Overrides the Endpoint's address.hostname in this environment
+	Hostname *string `json:"hostname,omitempty"`
+
 	// Owner Identifies the endpoint and project an EndpointRelease or EndpointReleaseBinding belongs to.
 	Owner EndpointReleaseOwner `json:"owner"`
 }
 
 // EndpointReleaseBindingStatus Observed state of an EndpointReleaseBinding.
 type EndpointReleaseBindingStatus struct {
+	// Addresses Host and path pairs this binding serves in its environment
+	Addresses *[]EndpointResolvedAddress `json:"addresses,omitempty"`
+
 	// Backends Resolution of each backendRef in this binding's environment
 	Backends *[]ResolvedEndpointBackend `json:"backends,omitempty"`
 
@@ -2214,6 +2269,9 @@ type EndpointReleaseOwner struct {
 
 // EndpointReleaseSpec Desired state of an EndpointRelease. Immutable after creation.
 type EndpointReleaseSpec struct {
+	// Address The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
+	Address *EndpointAddress `json:"address,omitempty"`
+
 	// BackendRefs Snapshot of Endpoint.spec.backendRefs at release time.
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`
 
@@ -2234,10 +2292,24 @@ type EndpointReleaseSpec struct {
 
 	// Parameters Snapshot of parameter values from Endpoint.spec at release time.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
+
+	// TakeOver A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
+	// to the Endpoint without a gap. Can be added or removed, not changed.
+	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
 }
 
 // EndpointReleaseSpecEndpointTypeKind Source kind (EndpointType or ClusterEndpointType)
 type EndpointReleaseSpecEndpointTypeKind string
+
+// EndpointResolvedAddress A host and path a binding serves in its environment.
+type EndpointResolvedAddress struct {
+	Host string                      `json:"host"`
+	Kind EndpointResolvedAddressKind `json:"kind"`
+	Path string                      `json:"path"`
+}
+
+// EndpointResolvedAddressKind defines model for EndpointResolvedAddress.Kind.
+type EndpointResolvedAddressKind string
 
 // EndpointRouteOwner An Endpoint that routes traffic to a workload endpoint.
 type EndpointRouteOwner struct {
@@ -2254,9 +2326,6 @@ type EndpointRouteOwnerVisibilities string
 // EndpointServingClaim The routing last confirmed accepted on the data plane. Component ReleaseBindings stop
 // rendering their own gateway routes for the claimed (component, endpoint, visibility) slots.
 type EndpointServingClaim struct {
-	// Backends Component workload endpoints receiving traffic (non-zero weight) through the accepted routes
-	Backends *[]EndpointBackendSlot `json:"backends,omitempty"`
-
 	// EndpointRelease Release whose rendered routes were accepted
 	EndpointRelease string `json:"endpointRelease"`
 
@@ -2266,6 +2335,9 @@ type EndpointServingClaim struct {
 	// Since When this claim was first established
 	Since time.Time `json:"since"`
 
+	// Urls Component workload endpoints whose URLs the accepted routes take over (the Endpoint's spec.takeOver)
+	Urls *[]EndpointBackendSlot `json:"urls,omitempty"`
+
 	// Visibilities Gateway visibilities the accepted routes serve
 	Visibilities *[]EndpointServingClaimVisibilities `json:"visibilities,omitempty"`
 }
@@ -2273,8 +2345,11 @@ type EndpointServingClaim struct {
 // EndpointServingClaimVisibilities defines model for EndpointServingClaim.Visibilities.
 type EndpointServingClaimVisibilities string
 
-// EndpointSpec Desired state of an Endpoint. spec.owner and spec.type are immutable after creation.
+// EndpointSpec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed.
 type EndpointSpec struct {
+	// Address The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
+	Address EndpointAddress `json:"address"`
+
 	// BackendRefs Component workload endpoints receiving traffic, with relative weights. May be empty; see reclaimPolicy.
 	BackendRefs *[]EndpointBackendRef `json:"backendRefs,omitempty"`
 
@@ -2290,6 +2365,10 @@ type EndpointSpec struct {
 	// ReclaimPolicy What happens when the Endpoint has no backends left. Delete removes it and hands its URL back;
 	// Retain keeps it as Orphaned, without routes, until a backend is added.
 	ReclaimPolicy *EndpointSpecReclaimPolicy `json:"reclaimPolicy,omitempty"`
+
+	// TakeOver A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
+	// to the Endpoint without a gap. Can be added or removed, not changed.
+	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
 
 	// Type Reference to an EndpointType or ClusterEndpointType template.
 	Type EndpointTypeRef `json:"type"`
@@ -2315,6 +2394,13 @@ type EndpointStatus struct {
 
 	// ObservedGeneration Most recent generation observed by the controller
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+}
+
+// EndpointTakeOver A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
+// to the Endpoint without a gap. Can be added or removed, not changed.
+type EndpointTakeOver struct {
+	// Component A workload endpoint of a component in the Endpoint's project.
+	Component EndpointComponentRef `json:"component"`
 }
 
 // EndpointType EndpointType resource.
@@ -2388,6 +2474,12 @@ type EndpointTypeResourceTargetPlane string
 
 // EndpointTypeSpec Desired state of a (Cluster)EndpointType.
 type EndpointTypeSpec struct {
+	// AllowedBackendKinds Backend kinds Endpoints of this type may use. External must be allowed explicitly.
+	AllowedBackendKinds *[]EndpointTypeSpecAllowedBackendKinds `json:"allowedBackendKinds,omitempty"`
+
+	// AllowedHostnames Hostnames Endpoints of this type may use as their own; a leading "*." matches one label. Empty means the environment's gateway host only.
+	AllowedHostnames *[]string `json:"allowedHostnames,omitempty"`
+
 	// EnvironmentConfigs Schema section using openAPIV3Schema format
 	EnvironmentConfigs *SchemaSection `json:"environmentConfigs,omitempty"`
 
@@ -2400,6 +2492,9 @@ type EndpointTypeSpec struct {
 	// Validations CEL-based validation rules evaluated before rendering
 	Validations *[]ValidationRule `json:"validations,omitempty"`
 }
+
+// EndpointTypeSpecAllowedBackendKinds defines model for EndpointTypeSpec.AllowedBackendKinds.
+type EndpointTypeSpecAllowedBackendKinds string
 
 // EndpointURL Structured URL with its components
 type EndpointURL struct {
@@ -3705,10 +3800,16 @@ type ResolvedConnectionVisibility string
 // ResolvedEndpointBackend Resolution of one backendRef in the binding's environment.
 type ResolvedEndpointBackend struct {
 	// ComponentName Backend component name
-	ComponentName string `json:"componentName"`
+	ComponentName *string `json:"componentName,omitempty"`
 
 	// Endpoint Workload endpoint name on the backend component
-	Endpoint string `json:"endpoint"`
+	Endpoint *string `json:"endpoint,omitempty"`
+
+	// ExternalURL URL used in this environment, for an external backend
+	ExternalURL *string `json:"externalURL,omitempty"`
+
+	// Name Backend name in the release
+	Name string `json:"name"`
 
 	// Reason Why the backend could not be resolved
 	Reason *string `json:"reason,omitempty"`

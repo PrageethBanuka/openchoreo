@@ -81,6 +81,11 @@ const (
 	// Valid values match EndpointVisibility: "project", "namespace", "internal", "external".
 	LabelKeyEndpointVisibility = "openchoreo.dev/endpoint-visibility"
 
+	// LabelKeyEndpointRoute marks a route an EndpointType renders for a
+	// taken-over component URL ("takeover"), so invoke-URL resolution reports
+	// the Endpoint's own address rather than the old URL.
+	LabelKeyEndpointRoute = "openchoreo.dev/endpoint-route"
+
 	// LabelKeyControlPlaneNamespace identifies a namespace as an OpenChoreo control plane namespace
 	// that groups user resources (Projects, Components, Environments, etc.)
 	// This label distinguishes control plane namespaces from:

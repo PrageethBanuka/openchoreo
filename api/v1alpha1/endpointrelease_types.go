@@ -25,12 +25,19 @@ type EndpointReleaseSpec struct {
 	// +kubebuilder:validation:Required
 	EndpointType EndpointReleaseEndpointType `json:"endpointType"`
 
+	// Address is the URL the Endpoint serves, copied from the Endpoint spec.
+	// +kubebuilder:validation:Required
+	Address EndpointAddress `json:"address"`
+
+	// TakeOver is the component URL the Endpoint also serves, if any.
+	// +optional
+	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
+
 	// BackendRefs holds the snapshot of backend references and weights from the
 	// Endpoint spec at release time.
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map
-	// +listMapKey=componentName
-	// +listMapKey=endpoint
+	// +listMapKey=name
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`
 
 	// Parameters holds the snapshot of parameter values from the Endpoint spec at

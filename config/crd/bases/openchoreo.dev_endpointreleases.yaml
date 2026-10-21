@@ -57,27 +57,77 @@ spec:
               EndpointType (or ClusterEndpointType) spec at the time it was cut. Created
               exclusively by the Endpoint controller.
             properties:
+              address:
+                description: Address is the URL the Endpoint serves, copied from the
+                  Endpoint spec.
+                properties:
+                  hostname:
+                    description: |-
+                      Hostname is the Endpoint's own hostname, for example payments.example.com.
+                      It must match the EndpointType's allowedHostnames, and each environment's
+                      binding can override it. When unset, the environment's gateway host is
+                      used, the same host component URLs use.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$
+                    type: string
+                  path:
+                    description: Path is the path prefix clients call, for example
+                      /payments.
+                    maxLength: 200
+                    pattern: ^/[a-z0-9]([-a-z0-9/._]*[a-z0-9])?$
+                    type: string
+                required:
+                - path
+                type: object
               backendRefs:
                 description: |-
                   BackendRefs holds the snapshot of backend references and weights from the
                   Endpoint spec at release time.
                 items:
                   description: |-
-                    EndpointBackendRef references a named workload endpoint of a component as a
-                    traffic backend.
+                    EndpointBackendRef is one backend of an Endpoint: a component workload
+                    endpoint or an external service, with its relative weight.
                   properties:
-                    componentName:
+                    component:
+                      description: Component is a workload endpoint of a component
+                        in the Endpoint's project.
+                      properties:
+                        endpoint:
+                          description: |-
+                            Endpoint is the name of the endpoint in the component's
+                            Workload.spec.endpoints. Determines the port and protocol.
+                          minLength: 1
+                          type: string
+                        name:
+                          description: Name is the name of the Component.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - endpoint
+                      - name
+                      type: object
+                    external:
                       description: |-
-                        ComponentName is the name of the Component that serves this backend, in
-                        the Endpoint's project.
+                        External is a service outside OpenChoreo. Its URL is the default for every
+                        environment; a binding can override it.
+                      properties:
+                        url:
+                          description: URL is the service's base URL, for example
+                            https://legacy.example.com.
+                          maxLength: 2048
+                          pattern: ^https?://[a-zA-Z0-9]([-a-zA-Z0-9.]*[a-zA-Z0-9])?(:[0-9]{1,5})?(/.*)?$
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: |-
+                        Name identifies the backend within the Endpoint, for example payments-v1
+                        or legacy. Per-environment overrides refer to it.
+                      maxLength: 63
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                      type: string
-                    endpoint:
-                      description: |-
-                        Endpoint is the name of the endpoint in the component's
-                        Workload.spec.endpoints to route to. Determines the backend port and protocol.
-                      minLength: 1
                       type: string
                     weight:
                       default: 1
@@ -90,14 +140,15 @@ spec:
                       minimum: 0
                       type: integer
                   required:
-                  - componentName
-                  - endpoint
+                  - name
                   type: object
+                  x-kubernetes-validations:
+                  - message: a backend sets exactly one of component or external
+                    rule: has(self.component) != has(self.external)
                 minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
-                - componentName
-                - endpoint
+                - name
                 x-kubernetes-list-type: map
               endpointType:
                 description: |-
@@ -128,6 +179,29 @@ spec:
                       ClusterEndpointType source will lose them; revisit this field then. Mirrors
                       the ResourceReleaseResourceType precedent.
                     properties:
+                      allowedBackendKinds:
+                        default:
+                        - Component
+                        description: |-
+                          AllowedBackendKinds lists the backend kinds Endpoints of this type may use.
+                          External backends send traffic outside the cluster, so they must be
+                          allowed explicitly.
+                        items:
+                          description: EndpointBackendKind is the kind of an Endpoint
+                            backend.
+                          enum:
+                          - Component
+                          - External
+                          type: string
+                        type: array
+                      allowedHostnames:
+                        description: |-
+                          AllowedHostnames lists the hostnames Endpoints of this type may use as
+                          their own hostname. A leading "*." matches any one label, for example
+                          "*.example.com". Empty means Endpoints use the environment's gateway host.
+                        items:
+                          type: string
+                        type: array
                       environmentConfigs:
                         description: |-
                           EnvironmentConfigs defines the per-env schema.
@@ -271,7 +345,34 @@ spec:
                   release time. The schema for these values is defined by the EndpointType's
                   parameters schema.
                 x-kubernetes-preserve-unknown-fields: true
+              takeOver:
+                description: TakeOver is the component URL the Endpoint also serves,
+                  if any.
+                properties:
+                  component:
+                    description: Component is the workload endpoint whose URL is taken
+                      over.
+                    properties:
+                      endpoint:
+                        description: |-
+                          Endpoint is the name of the endpoint in the component's
+                          Workload.spec.endpoints. Determines the port and protocol.
+                        minLength: 1
+                        type: string
+                      name:
+                        description: Name is the name of the Component.
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - endpoint
+                    - name
+                    type: object
+                required:
+                - component
+                type: object
             required:
+            - address
             - backendRefs
             - endpointType
             - owner

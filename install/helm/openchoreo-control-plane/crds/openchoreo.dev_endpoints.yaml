@@ -20,6 +20,13 @@ spec:
     - jsonPath: .spec.type.name
       name: Type
       type: string
+    - jsonPath: .spec.address.path
+      name: Path
+      type: string
+    - jsonPath: .spec.address.hostname
+      name: Hostname
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -55,29 +62,85 @@ spec:
           spec:
             description: EndpointSpec defines the desired state of Endpoint.
             properties:
+              address:
+                description: |-
+                  Address is the URL this Endpoint serves: a path, on the environment's
+                  gateway host or on its own hostname. It belongs to the Endpoint, so it
+                  stays the same whatever backends answer it, and it is fixed at creation.
+                properties:
+                  hostname:
+                    description: |-
+                      Hostname is the Endpoint's own hostname, for example payments.example.com.
+                      It must match the EndpointType's allowedHostnames, and each environment's
+                      binding can override it. When unset, the environment's gateway host is
+                      used, the same host component URLs use.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$
+                    type: string
+                  path:
+                    description: Path is the path prefix clients call, for example
+                      /payments.
+                    maxLength: 200
+                    pattern: ^/[a-z0-9]([-a-z0-9/._]*[a-z0-9])?$
+                    type: string
+                required:
+                - path
+                type: object
+                x-kubernetes-validations:
+                - message: spec.address cannot be changed after creation; create a
+                    new Endpoint to serve another address
+                  rule: self == oldSelf
               backendRefs:
                 description: |-
-                  BackendRefs lists the component endpoints this Endpoint routes traffic to,
-                  with relative weights. Like a Service selecting Pods, the Endpoint does not
-                  own the referenced components.
+                  BackendRefs lists what answers the Endpoint's traffic, with relative
+                  weights: component workload endpoints of the project, or external
+                  services. Like a Service selecting Pods, the Endpoint does not own them.
                   An Endpoint may be left with no backends; see ReclaimPolicy.
                 items:
                   description: |-
-                    EndpointBackendRef references a named workload endpoint of a component as a
-                    traffic backend.
+                    EndpointBackendRef is one backend of an Endpoint: a component workload
+                    endpoint or an external service, with its relative weight.
                   properties:
-                    componentName:
+                    component:
+                      description: Component is a workload endpoint of a component
+                        in the Endpoint's project.
+                      properties:
+                        endpoint:
+                          description: |-
+                            Endpoint is the name of the endpoint in the component's
+                            Workload.spec.endpoints. Determines the port and protocol.
+                          minLength: 1
+                          type: string
+                        name:
+                          description: Name is the name of the Component.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - endpoint
+                      - name
+                      type: object
+                    external:
                       description: |-
-                        ComponentName is the name of the Component that serves this backend, in
-                        the Endpoint's project.
+                        External is a service outside OpenChoreo. Its URL is the default for every
+                        environment; a binding can override it.
+                      properties:
+                        url:
+                          description: URL is the service's base URL, for example
+                            https://legacy.example.com.
+                          maxLength: 2048
+                          pattern: ^https?://[a-zA-Z0-9]([-a-zA-Z0-9.]*[a-zA-Z0-9])?(:[0-9]{1,5})?(/.*)?$
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: |-
+                        Name identifies the backend within the Endpoint, for example payments-v1
+                        or legacy. Per-environment overrides refer to it.
+                      maxLength: 63
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                      type: string
-                    endpoint:
-                      description: |-
-                        Endpoint is the name of the endpoint in the component's
-                        Workload.spec.endpoints to route to. Determines the backend port and protocol.
-                      minLength: 1
                       type: string
                     weight:
                       default: 1
@@ -90,13 +153,14 @@ spec:
                       minimum: 0
                       type: integer
                   required:
-                  - componentName
-                  - endpoint
+                  - name
                   type: object
+                  x-kubernetes-validations:
+                  - message: a backend sets exactly one of component or external
+                    rule: has(self.component) != has(self.external)
                 type: array
                 x-kubernetes-list-map-keys:
-                - componentName
-                - endpoint
+                - name
                 x-kubernetes-list-type: map
               owner:
                 description: Owner identifies the Project this Endpoint belongs to.
@@ -129,6 +193,36 @@ spec:
                 - Delete
                 - Retain
                 type: string
+              takeOver:
+                description: |-
+                  TakeOver optionally makes the Endpoint also serve one component workload
+                  endpoint's existing URL, so clients of that URL move to the Endpoint
+                  without a gap. The component stops rendering its own route for it once
+                  the Endpoint's route is accepted, and renders it again when the take-over
+                  is removed. It can be added or removed, but not changed.
+                properties:
+                  component:
+                    description: Component is the workload endpoint whose URL is taken
+                      over.
+                    properties:
+                      endpoint:
+                        description: |-
+                          Endpoint is the name of the endpoint in the component's
+                          Workload.spec.endpoints. Determines the port and protocol.
+                        minLength: 1
+                        type: string
+                      name:
+                        description: Name is the name of the Component.
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - endpoint
+                    - name
+                    type: object
+                required:
+                - component
+                type: object
               type:
                 description: |-
                   Type references the EndpointType or ClusterEndpointType template for this Endpoint.
@@ -156,9 +250,14 @@ spec:
                 - message: spec.type cannot be changed after creation
                   rule: self == oldSelf
             required:
+            - address
             - owner
             - type
             type: object
+            x-kubernetes-validations:
+            - message: spec.takeOver can be added or removed but not changed
+              rule: '!has(oldSelf.takeOver) || !has(self.takeOver) || self.takeOver
+                == oldSelf.takeOver'
           status:
             description: EndpointStatus defines the observed state of Endpoint.
             properties:

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -14,17 +15,20 @@ import (
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 )
 
-// EndpointUsage is one backend of an Endpoint that points at a component, with
-// the weight the release pinned in one environment gives it. Environment is
-// empty for an Endpoint that is not bound in any environment yet.
-// OtherBackends counts the release's backends that are not this component, so
-// callers can tell whether the traffic could be moved elsewhere.
+// EndpointUsage is one workload endpoint of a component that an Endpoint
+// routes to or serves the URL of, with the weight the release pinned in one
+// environment gives it. Environment is empty for an Endpoint that is not bound
+// in any environment yet. OtherBackends counts the release's backends that are
+// not this component, so callers can tell whether the traffic could be moved
+// elsewhere. ServesURL is true when the Endpoint serves this workload
+// endpoint's URL; Weight is 0 when the component is not one of its backends.
 type EndpointUsage struct {
 	Endpoint         string
 	WorkloadEndpoint string
 	Environment      string
 	Weight           int32
 	OtherBackends    int
+	ServesURL        bool
 }
 
 // EndpointBackendWeight returns the effective weight of a backendRef. An unset
@@ -36,27 +40,75 @@ func EndpointBackendWeight(ref openchoreov1alpha1.EndpointBackendRef) int32 {
 	return *ref.Weight
 }
 
+// BackendComponent returns the component and workload endpoint a backend
+// routes to, and false for an external backend.
+func BackendComponent(ref openchoreov1alpha1.EndpointBackendRef) (component, endpoint string, ok bool) {
+	if ref.Component == nil {
+		return "", "", false
+	}
+	return ref.Component.Name, ref.Component.Endpoint, true
+}
+
+// TakenOver returns the component workload endpoint whose URL the Endpoint
+// takes over, or nil.
+func TakenOver(ep *openchoreov1alpha1.Endpoint) *openchoreov1alpha1.EndpointComponentRef {
+	if ep.Spec.TakeOver == nil {
+		return nil
+	}
+	return &ep.Spec.TakeOver.Component
+}
+
+// componentSlot is one workload endpoint of the component an Endpoint uses.
+type componentSlot struct {
+	workloadEndpoint string
+	servesURL        bool
+}
+
+// componentSlots returns the workload endpoints of component the Endpoint uses,
+// as backends or as the URL it serves, sorted by name.
+func componentSlots(ep *openchoreov1alpha1.Endpoint, component string) []componentSlot {
+	idx := map[string]int{}
+	var slots []componentSlot
+	add := func(wl string, url bool) {
+		if i, ok := idx[wl]; ok {
+			slots[i].servesURL = slots[i].servesURL || url
+			return
+		}
+		idx[wl] = len(slots)
+		slots = append(slots, componentSlot{workloadEndpoint: wl, servesURL: url})
+	}
+	if t := TakenOver(ep); t != nil && t.Name == component {
+		add(t.Endpoint, true)
+	}
+	for _, ref := range ep.Spec.BackendRefs {
+		if name, wl, ok := BackendComponent(ref); ok && name == component {
+			add(wl, false)
+		}
+	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i].workloadEndpoint < slots[j].workloadEndpoint })
+	return slots
+}
+
 // ComponentEndpointUsage lists every Endpoint in the project that has the
-// component as a backend, with its weight in each environment's pinned release.
-// It is shared by the Component reverse index, the Component delete guard and
-// the openchoreo-api delete guard so they agree. It lists in the namespace and
-// filters in memory, so it works with cached and uncached clients alike.
+// component as a backend or serves one of its URLs, with its weight in each
+// environment's pinned release. It is shared by the Component reverse index,
+// the Component delete guard and the openchoreo-api delete guard so they agree.
+// It lists in the namespace and filters in memory, so it works with cached and
+// uncached clients alike.
 func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, project, component string) ([]EndpointUsage, error) {
 	var endpoints openchoreov1alpha1.EndpointList
 	if err := c.List(ctx, &endpoints, client.InNamespace(namespace)); err != nil {
 		return nil, fmt.Errorf("list endpoints: %w", err)
 	}
 
-	routing := map[string][]string{} // endpoint name -> workload endpoints of this component
+	routing := map[string][]componentSlot{} // endpoint name -> workload endpoints of this component
 	for i := range endpoints.Items {
 		ep := &endpoints.Items[i]
 		if ep.Spec.Owner.ProjectName != project {
 			continue
 		}
-		for _, ref := range ep.Spec.BackendRefs {
-			if ref.ComponentName == component {
-				routing[ep.Name] = append(routing[ep.Name], ref.Endpoint)
-			}
+		if slots := componentSlots(ep, component); len(slots) > 0 {
+			routing[ep.Name] = slots
 		}
 	}
 	if len(routing) == 0 {
@@ -75,7 +127,7 @@ func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, pro
 		if b.Spec.Owner.ProjectName != project || b.Spec.EndpointRelease == "" {
 			continue
 		}
-		wls, ok := routing[b.Spec.Owner.EndpointName]
+		slots, ok := routing[b.Spec.Owner.EndpointName]
 		if !ok {
 			continue
 		}
@@ -89,33 +141,34 @@ func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, pro
 		bound[b.Spec.Owner.EndpointName] = true
 		others := 0
 		for _, ref := range rel.Spec.BackendRefs {
-			if ref.ComponentName != component {
+			if name, _, ok := BackendComponent(ref); !ok || name != component {
 				others++
 			}
 		}
-		for _, wl := range wls {
+		for _, slot := range slots {
 			var weight int32
 			for _, ref := range rel.Spec.BackendRefs {
-				if ref.ComponentName == component && ref.Endpoint == wl {
+				if name, wl, ok := BackendComponent(ref); ok && name == component && wl == slot.workloadEndpoint {
 					weight = EndpointBackendWeight(ref)
 				}
 			}
 			usages = append(usages, EndpointUsage{
 				Endpoint:         b.Spec.Owner.EndpointName,
-				WorkloadEndpoint: wl,
+				WorkloadEndpoint: slot.workloadEndpoint,
 				Environment:      b.Spec.Environment,
 				Weight:           weight,
 				OtherBackends:    others,
+				ServesURL:        slot.servesURL,
 			})
 		}
 	}
 
-	for name, wls := range routing {
+	for name, slots := range routing {
 		if bound[name] {
 			continue
 		}
-		for _, wl := range wls {
-			usages = append(usages, EndpointUsage{Endpoint: name, WorkloadEndpoint: wl})
+		for _, slot := range slots {
+			usages = append(usages, EndpointUsage{Endpoint: name, WorkloadEndpoint: slot.workloadEndpoint, ServesURL: slot.servesURL})
 		}
 	}
 
@@ -132,19 +185,49 @@ func ComponentEndpointUsage(ctx context.Context, c client.Reader, namespace, pro
 	return usages, nil
 }
 
-// RoutedEndpointUsage returns the usages that block deleting the component: it
-// has a weight above 0 in some environment and the release has other backends
-// the traffic can be moved to first. A component that is the only backend of a
-// release can be deleted; its Endpoint then has no backends and its
+// RoutedEndpointUsage returns the usages that block deleting the component:
+// either it has a weight above 0 in some environment and the release has other
+// backends the traffic can be moved to first, or an Endpoint bound in some
+// environment serves its URL to other backends, which deleting the component
+// would take offline. A component that is the only backend of a release and
+// serves its URL can be deleted; its Endpoint then has no backends and its
 // reclaimPolicy applies.
 func RoutedEndpointUsage(usages []EndpointUsage) []EndpointUsage {
 	var out []EndpointUsage
 	for _, u := range usages {
-		if u.Environment != "" && u.Weight > 0 && u.OtherBackends > 0 {
+		if u.Environment == "" || u.OtherBackends == 0 {
+			continue
+		}
+		if u.Weight > 0 || u.ServesURL {
 			out = append(out, u)
 		}
 	}
 	return out
+}
+
+// StillRoutedReason describes routed usages for a delete refusal, for example
+// "receives traffic through payments-api in development (weight 10); serves the
+// URL of payments-api in staging", followed by what to do first.
+func StillRoutedReason(routed []EndpointUsage) string {
+	var traffic, urls []string
+	for _, u := range routed {
+		if u.Weight > 0 {
+			traffic = append(traffic, fmt.Sprintf("%s in %s (weight %d)", u.Endpoint, u.Environment, u.Weight))
+		}
+		if u.ServesURL {
+			urls = append(urls, fmt.Sprintf("%s in %s", u.Endpoint, u.Environment))
+		}
+	}
+	var parts, fixes []string
+	if len(traffic) > 0 {
+		parts = append(parts, "receives traffic through "+strings.Join(traffic, ", "))
+		fixes = append(fixes, "move its weight to 0 and roll out")
+	}
+	if len(urls) > 0 {
+		parts = append(parts, "has its URL served by "+strings.Join(urls, ", "))
+		fixes = append(fixes, "delete the Endpoint serving its URL")
+	}
+	return strings.Join(parts, "; ") + "; " + strings.Join(fixes, ", and ") + " before deleting"
 }
 
 // ComponentEndpointRefs folds usages into the entries of Component.status.endpoints.
@@ -155,7 +238,9 @@ func ComponentEndpointRefs(usages []EndpointUsage) []openchoreov1alpha1.Componen
 		key := [2]string{u.Endpoint, u.WorkloadEndpoint}
 		i, ok := idx[key]
 		if !ok {
-			refs = append(refs, openchoreov1alpha1.ComponentEndpointRef{Name: u.Endpoint, Endpoint: u.WorkloadEndpoint})
+			refs = append(refs, openchoreov1alpha1.ComponentEndpointRef{
+				Name: u.Endpoint, Endpoint: u.WorkloadEndpoint, ServesURL: u.ServesURL,
+			})
 			i = len(refs) - 1
 			idx[key] = i
 		}
@@ -188,12 +273,72 @@ func EndpointTypeRefEqual(a, b openchoreov1alpha1.EndpointTypeRef) bool {
 	return kind(a.Kind) == kind(b.Kind) && a.Name == b.Name
 }
 
-// HasEndpointBackend reports whether the Endpoint routes to the given
-// component's workload endpoint.
-func HasEndpointBackend(ep *openchoreov1alpha1.Endpoint, componentName, endpointKey string) bool {
+// EndpointComponentNames returns the distinct components an Endpoint
+// references: the component whose URL it serves first, then its backends in
+// order.
+func EndpointComponentNames(ep *openchoreov1alpha1.Endpoint) []string {
+	seen := make(map[string]struct{}, len(ep.Spec.BackendRefs)+1)
+	names := make([]string, 0, len(ep.Spec.BackendRefs)+1)
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	if t := TakenOver(ep); t != nil {
+		add(t.Name)
+	}
 	for _, ref := range ep.Spec.BackendRefs {
-		if ref.ComponentName == componentName && ref.Endpoint == endpointKey {
+		if name, _, ok := BackendComponent(ref); ok {
+			add(name)
+		}
+	}
+	return names
+}
+
+// SameEndpointAddress reports whether two Endpoints claim the same address.
+// An address on the environment's gateway host (no hostname) shares that host
+// with every project in the namespace, so those compare within a namespace; an
+// address with its own hostname compares across namespaces.
+func SameEndpointAddress(a, b *openchoreov1alpha1.Endpoint) bool {
+	if a.Spec.Address.Path == "" || a.Spec.Address != b.Spec.Address {
+		return false
+	}
+	return a.Spec.Address.Hostname != "" || a.Namespace == b.Namespace
+}
+
+// SameEndpointTakeOver reports whether two Endpoints of one project take over
+// the same component URL.
+func SameEndpointTakeOver(a, b *openchoreov1alpha1.Endpoint) bool {
+	ta, tb := TakenOver(a), TakenOver(b)
+	return ta != nil && tb != nil && a.Namespace == b.Namespace &&
+		a.Spec.Owner.ProjectName == b.Spec.Owner.ProjectName && *ta == *tb
+}
+
+// ServesEndpointURL reports whether the Endpoint takes over the URL of the
+// given component's workload endpoint.
+func ServesEndpointURL(ep *openchoreov1alpha1.Endpoint, componentName, endpointKey string) bool {
+	t := TakenOver(ep)
+	return t != nil && t.Name == componentName && t.Endpoint == endpointKey
+}
+
+// HostMatches reports whether host matches one of the patterns, where a
+// leading "*." matches exactly one label.
+func HostMatches(host string, patterns []string) bool {
+	for _, p := range patterns {
+		if p == host {
 			return true
+		}
+		if strings.HasPrefix(p, "*.") {
+			suffix := p[1:]
+			if strings.HasSuffix(host, suffix) && !strings.Contains(strings.TrimSuffix(host, suffix), ".") &&
+				len(host) > len(suffix) {
+				return true
+			}
 		}
 	}
 	return false

@@ -25,8 +25,8 @@ func usageFixture(t *testing.T) client.Client {
 	const ns = "default"
 	backends := func(v1, v2 int32) []openchoreov1alpha1.EndpointBackendRef {
 		return []openchoreov1alpha1.EndpointBackendRef{
-			{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To(v1)},
-			{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To(v2)},
+			{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To(v1)},
+			{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To(v2)},
 		}
 	}
 	objs := []client.Object{
@@ -50,7 +50,7 @@ func usageFixture(t *testing.T) client.Client {
 			ObjectMeta: metav1.ObjectMeta{Name: "preview", Namespace: ns},
 			Spec: openchoreov1alpha1.EndpointSpec{
 				Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
-				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "http"}},
+				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}},
 			},
 		},
 		&openchoreov1alpha1.EndpointRelease{
@@ -113,4 +113,32 @@ func TestComponentEndpointUsageNone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, usages)
 	assert.Empty(t, RoutedEndpointUsage(usages))
+}
+
+func TestComponentEndpointUsageServedURL(t *testing.T) {
+	c := usageFixture(t)
+	ep := &openchoreov1alpha1.Endpoint{}
+	require.NoError(t, c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "payments-api"}, ep))
+	ep.Spec.TakeOver = &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}
+	require.NoError(t, c.Update(context.Background(), ep))
+
+	usages, err := ComponentEndpointUsage(context.Background(), c, "default", "shop", "payments-v1")
+	require.NoError(t, err)
+
+	// At weight 0 in development payments-v1 still serves the URL the other
+	// backend's traffic comes in on, so deleting it would take that URL down.
+	routed := RoutedEndpointUsage(usages)
+	assert.Equal(t, []EndpointUsage{
+		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "development", Weight: 0, OtherBackends: 1, ServesURL: true},
+		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90, OtherBackends: 1, ServesURL: true},
+	}, routed)
+	assert.Equal(t,
+		"receives traffic through payments-api in production (weight 90); "+
+			"has its URL served by payments-api in development, payments-api in production; "+
+			"move its weight to 0 and roll out, and delete the Endpoint serving its URL before deleting",
+		StillRoutedReason(routed))
+
+	refs := ComponentEndpointRefs(usages)
+	require.NotEmpty(t, refs)
+	assert.True(t, refs[0].ServesURL)
 }

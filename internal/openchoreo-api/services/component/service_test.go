@@ -485,8 +485,8 @@ func TestDeleteComponent(t *testing.T) {
 		other := "other-component"
 		refs := func(w int32) []openchoreov1alpha1.EndpointBackendRef {
 			return []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: testComponentName, Endpoint: "http", Weight: ptr.To(w)},
-				{ComponentName: other, Endpoint: "http", Weight: ptr.To(100 - w)},
+				{Name: testComponentName, Component: &openchoreov1alpha1.EndpointComponentRef{Name: testComponentName, Endpoint: "http"}, Weight: ptr.To(w)},
+				{Name: other, Component: &openchoreov1alpha1.EndpointComponentRef{Name: other, Endpoint: "http"}, Weight: ptr.To(100 - w)},
 			}
 		}
 		return []client.Object{

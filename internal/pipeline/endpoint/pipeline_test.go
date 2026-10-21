@@ -50,6 +50,19 @@ func fixtureBackends() []Backend {
 	}
 }
 
+// fixtureAddress is the fixture Endpoint's own address.
+func fixtureAddress() AddressContext {
+	return AddressContext{Host: "development-default.openchoreoapis.localhost", Path: "/payments"}
+}
+
+// fixtureTakeOver is payments-v1's api URL, taken over by the fixture Endpoint.
+func fixtureTakeOver() *URLContext {
+	return &URLContext{
+		ComponentName: "payments-v1", Endpoint: "api", BasePath: "/",
+		External: &Address{Scheme: "http", Host: "development-default.openchoreoapis.localhost", Port: 19080, Path: "/payments-v1-api"},
+	}
+}
+
 // weightedRouteTemplate is the HTTPRoute shape from the Endpoint design: one
 // rule whose backendRefs are mapped from ${backends}.
 func weightedRouteTemplate(t *testing.T) v1alpha1.ResourceTemplate {
@@ -118,6 +131,7 @@ func TestRender_WeightedHTTPRoute(t *testing.T) {
 		},
 		Parameters:  rawExt(t, map[string]any{"hostname": "payments.shop.example.com"}),
 		Backends:    fixtureBackends(),
+		Address:     fixtureAddress(),
 		Metadata:    fixtureMetadata(),
 		Environment: fixtureGateway(),
 	})
@@ -165,6 +179,7 @@ func TestRender_ForEachOverBackends(t *testing.T) {
 			}},
 		},
 		Backends: fixtureBackends(),
+		Address:  fixtureAddress(),
 		Metadata: fixtureMetadata(),
 	})
 	require.NoError(t, err)
@@ -186,6 +201,7 @@ func TestRender_IncludeWhenSkipsEntry(t *testing.T) {
 	out, err := p.Render(context.Background(), &RenderInput{
 		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{route}},
 		Backends:         fixtureBackends(),
+		Address:          fixtureAddress(),
 		Metadata:         fixtureMetadata(),
 		Environment:      fixtureGateway(),
 	})
@@ -205,6 +221,7 @@ func TestRender_ValidationFailureAborts(t *testing.T) {
 			Resources: []v1alpha1.ResourceTemplate{weightedRouteTemplate(t)},
 		},
 		Backends: []Backend{{ComponentName: "c", Endpoint: "rpc", Protocol: "gRPC", ServiceName: "c", Port: 9090, Weight: 1}},
+		Address:  fixtureAddress(),
 		Metadata: fixtureMetadata(),
 	})
 	require.Error(t, err)
@@ -220,6 +237,7 @@ func TestRender_RejectsNonDataPlaneTarget(t *testing.T) {
 	_, err := p.Render(context.Background(), &RenderInput{
 		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{route}},
 		Backends:         fixtureBackends(),
+		Address:          fixtureAddress(),
 		Metadata:         fixtureMetadata(),
 	})
 	require.Error(t, err)
@@ -241,66 +259,82 @@ func TestRender_RejectsMissingInputs(t *testing.T) {
 	assert.Contains(t, err.Error(), "Namespace is empty")
 }
 
-// inheritingRouteTemplate serves every backend's existing external address with
-// the weighted split, rewriting each inherited path to the backend's base path.
-// This is the default the shipped EndpointType follows: old URLs keep working
-// and carry the canary.
-func inheritingRouteTemplate(t *testing.T) v1alpha1.ResourceTemplate {
-	return v1alpha1.ResourceTemplate{
-		ID: "route",
-		Template: rawExt(t, map[string]any{
-			"apiVersion": "gateway.networking.k8s.io/v1",
-			"kind":       "HTTPRoute",
-			"metadata": map[string]any{
-				"name":      "${metadata.name}",
-				"namespace": "${metadata.namespace}",
-			},
-			"spec": map[string]any{
-				"parentRefs": []any{map[string]any{"name": "${gateway.ingress.external.name}"}},
-				"hostnames":  `${backends.filter(b, has(b.componentURLs.external)).map(b, b.componentURLs.external.host).distinct()}`,
-				"rules": `${backends.filter(a, has(a.componentURLs.external)).map(a, {
-					"matches": [{"path": {"type": "PathPrefix", "value": a.componentURLs.external.path}}],
-					"filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": a.basePath}}}],
-					"backendRefs": backends.map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
-				})}`,
-			},
-		}),
+// addressRouteTemplate is the shape the shipped http-weighted type follows:
+// one route for the Endpoint's own address, a second for the taken-over URL
+// when there is one, both splitting across every backend by weight.
+func addressRouteTemplates(t *testing.T) []v1alpha1.ResourceTemplate {
+	route := func(id, host, path, include string) v1alpha1.ResourceTemplate {
+		tmpl := v1alpha1.ResourceTemplate{
+			ID: id,
+			Template: rawExt(t, map[string]any{
+				"apiVersion": "gateway.networking.k8s.io/v1",
+				"kind":       "HTTPRoute",
+				"metadata":   map[string]any{"name": "${metadata.name}-" + id, "namespace": "${metadata.namespace}"},
+				"spec": map[string]any{
+					"parentRefs": []any{map[string]any{"name": "${gateway.ingress.external.name}"}},
+					"hostnames":  []any{host},
+					"rules": []any{map[string]any{
+						"matches":     []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": path}}},
+						"backendRefs": `${backends.map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})}`,
+					}},
+				},
+			}),
+		}
+		if include != "" {
+			tmpl.IncludeWhen = include
+		}
+		return tmpl
+	}
+	return []v1alpha1.ResourceTemplate{
+		route("route", "${address.host}", "${address.path}", ""),
+		route("takeover", "${takeOver.external.host}", "${takeOver.external.path}", "${takeOver != null}"),
 	}
 }
 
-func TestRender_InheritsBackendAddresses(t *testing.T) {
+func TestRender_ServesTheEndpointAddressAndTakeOver(t *testing.T) {
 	p := NewPipeline()
 
 	backends := fixtureBackends()
-	for i, path := range []string{"/payments-v1-http", "/payments-v2-http"} {
-		backends[i].BasePath = "/"
-		backends[i].ComponentURLs = ComponentURLs{External: &Address{
-			Scheme: "http", Host: "development-default.openchoreoapis.localhost", Port: 19080, Path: path,
-		}}
-	}
-	// A backend with no external address of its own contributes no address.
 	backends = append(backends, Backend{
-		ComponentName: "payments-v3", Endpoint: "api", Protocol: "HTTP",
-		ServiceName: "payments-v3", Port: 8080, Weight: 0, BasePath: "/",
+		Name: "legacy", Kind: "External", Protocol: "HTTP", ServiceName: "e-payments-legacy", Port: 443, Weight: 0,
+		External: &ExternalBackend{Scheme: "https", Host: "legacy.example.com", Port: 443, URL: "https://legacy.example.com"},
 	})
 
-	out, err := p.Render(context.Background(), &RenderInput{
-		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{inheritingRouteTemplate(t)}},
-		Backends:         backends,
+	render := func(takeOver *URLContext) []RenderedEntry {
+		out, err := p.Render(context.Background(), &RenderInput{
+			EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: addressRouteTemplates(t)},
+			Backends:         backends,
+			Address:          fixtureAddress(),
+			TakeOver:         takeOver,
+			Metadata:         fixtureMetadata(),
+			Environment:      fixtureGateway(),
+		})
+		require.NoError(t, err)
+		return out.Entries
+	}
+
+	entries := render(nil)
+	require.Len(t, entries, 1, "without a take-over only the Endpoint's own address is routed")
+	spec := entries[0].Object["spec"].(map[string]any)
+	assert.JSONEq(t, `["development-default.openchoreoapis.localhost"]`, jsonOf(t, spec["hostnames"]))
+	split := `[{"name":"payments-v1","port":8080,"weight":90},{"name":"payments-v2","port":8080,"weight":10},{"name":"e-payments-legacy","port":443,"weight":0}]`
+	assert.JSONEq(t, `[{"matches":[{"path":{"type":"PathPrefix","value":"/payments"}}],"backendRefs":`+split+`}]`,
+		jsonOf(t, spec["rules"]), "external backends join the same split")
+
+	entries = render(fixtureTakeOver())
+	require.Len(t, entries, 2)
+	takeOverSpec := entries[1].Object["spec"].(map[string]any)
+	assert.JSONEq(t, `[{"matches":[{"path":{"type":"PathPrefix","value":"/payments-v1-api"}}],"backendRefs":`+split+`}]`,
+		jsonOf(t, takeOverSpec["rules"]), "the taken-over URL carries the same split")
+}
+
+func TestRender_RequiresAddress(t *testing.T) {
+	p := NewPipeline()
+	_, err := p.Render(context.Background(), &RenderInput{
+		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: addressRouteTemplates(t)},
+		Backends:         fixtureBackends(),
 		Metadata:         fixtureMetadata(),
-		Environment:      fixtureGateway(),
 	})
-	require.NoError(t, err)
-	require.Len(t, out.Entries, 1)
-
-	spec := out.Entries[0].Object["spec"].(map[string]any)
-	assert.JSONEq(t, `["development-default.openchoreoapis.localhost"]`, jsonOf(t, spec["hostnames"]),
-		"both backends share one hostname; it appears once")
-
-	split := `[{"name":"payments-v1","port":8080,"weight":90},{"name":"payments-v2","port":8080,"weight":10},{"name":"payments-v3","port":8080,"weight":0}]`
-	rewrite := `[{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplacePrefixMatch","replacePrefixMatch":"/"}}}]`
-	assert.JSONEq(t, `[
-		{"matches":[{"path":{"type":"PathPrefix","value":"/payments-v1-http"}}],"filters":`+rewrite+`,"backendRefs":`+split+`},
-		{"matches":[{"path":{"type":"PathPrefix","value":"/payments-v2-http"}}],"filters":`+rewrite+`,"backendRefs":`+split+`}
-	]`, jsonOf(t, spec["rules"]), "every old URL carries the weighted split")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input.Address is unset")
 }

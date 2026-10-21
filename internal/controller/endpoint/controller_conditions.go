@@ -40,6 +40,17 @@ const (
 	// not exist in the Endpoint's project.
 	ReasonBackendNotFound controller.ConditionReason = "BackendNotFound"
 
+	// ReasonAddressInUse indicates another, older Endpoint already serves this
+	// Endpoint's address, so this one routes nothing.
+	ReasonAddressInUse controller.ConditionReason = "AddressInUse"
+
+	// ReasonTakeOverInUse indicates another, older Endpoint already takes over
+	// the same component URL, so this one routes nothing.
+	ReasonTakeOverInUse controller.ConditionReason = "TakeOverInUse"
+
+	// ReasonNoWeightedBackend indicates every backend has weight 0.
+	ReasonNoWeightedBackend controller.ConditionReason = "NoWeightedBackend"
+
 	// ReasonNoBackends indicates the Endpoint has no backendRefs left.
 	ReasonNoBackends controller.ConditionReason = "NoBackends"
 

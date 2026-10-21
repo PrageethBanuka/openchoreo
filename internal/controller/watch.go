@@ -69,8 +69,8 @@ const (
 	IndexKeyEndpointReleaseBindingOwnerEnv = "endpointreleasebinding.spec.owner.projectName/endpointName/environment"
 
 	// IndexKeyEndpointBackendComponent indexes Endpoint by the (projectName, componentName)
-	// of each of its backendRefs, so a ReleaseBinding can find the Endpoints that route to
-	// its component.
+	// of each of its backendRefs and of its spec.url, so a ReleaseBinding can find the
+	// Endpoints that route to its component or serve its URL.
 	IndexKeyEndpointBackendComponent = "endpoint.spec.backendRefs.projectName/componentName"
 )
 
@@ -270,25 +270,18 @@ func IndexEndpointReleaseBindingOwnerEnv(obj client.Object) []string {
 }
 
 // IndexEndpointBackendComponent extracts one (project, component) key per distinct
-// backend component of an Endpoint. Exported for fake-client tests so they can
-// register the same indexer the production setup uses.
+// component an Endpoint references: its backends and the component whose URL it
+// serves. Exported for fake-client tests so they can register the same indexer
+// the production setup uses.
 func IndexEndpointBackendComponent(obj client.Object) []string {
 	ep := obj.(*openchoreov1alpha1.Endpoint)
 	if ep.Spec.Owner.ProjectName == "" {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(ep.Spec.BackendRefs))
-	keys := make([]string, 0, len(ep.Spec.BackendRefs))
-	for _, ref := range ep.Spec.BackendRefs {
-		if ref.ComponentName == "" {
-			continue
-		}
-		key := MakeEndpointBackendComponentKey(ep.Spec.Owner.ProjectName, ref.ComponentName)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		keys = append(keys, key)
+	names := EndpointComponentNames(ep)
+	keys := make([]string, 0, len(names))
+	for _, name := range names {
+		keys = append(keys, MakeEndpointBackendComponentKey(ep.Spec.Owner.ProjectName, name))
 	}
 	return keys
 }

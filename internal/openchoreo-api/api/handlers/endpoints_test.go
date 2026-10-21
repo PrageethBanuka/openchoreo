@@ -53,13 +53,14 @@ func newHandlerWithEndpointService(svc endpointsvc.Service) *Handler {
 func testEndpointObj(name string, components ...string) *openchoreov1alpha1.Endpoint {
 	refs := make([]openchoreov1alpha1.EndpointBackendRef, 0, len(components))
 	for _, c := range components {
-		refs = append(refs, openchoreov1alpha1.EndpointBackendRef{ComponentName: c, Endpoint: "http", Weight: ptr.To[int32](1)})
+		refs = append(refs, openchoreov1alpha1.EndpointBackendRef{Name: c, Component: &openchoreov1alpha1.EndpointComponentRef{Name: c, Endpoint: "http"}, Weight: ptr.To[int32](1)})
 	}
 	return &openchoreov1alpha1.Endpoint{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testEPNs},
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: testEPProject},
 			Type:        openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http-weighted"},
+			Address:     openchoreov1alpha1.EndpointAddress{Path: "/" + name},
 			BackendRefs: refs,
 		},
 	}
@@ -68,12 +69,13 @@ func testEndpointObj(name string, components ...string) *openchoreov1alpha1.Endp
 func newEndpointBody(name string, weights ...int32) gen.Endpoint {
 	refs := make([]gen.EndpointBackendRef, 0, len(weights))
 	for i, w := range weights {
-		refs = append(refs, gen.EndpointBackendRef{ComponentName: []string{"payments-v1", "payments-v2"}[i], Endpoint: "http", Weight: ptr.To(w)})
+		refs = append(refs, gen.EndpointBackendRef{Name: []string{"payments-v1", "payments-v2"}[i], Component: &gen.EndpointComponentRef{Name: []string{"payments-v1", "payments-v2"}[i], Endpoint: "http"}, Weight: ptr.To(w)})
 	}
 	body := gen.Endpoint{
 		Metadata: gen.ObjectMeta{Name: name},
 		Spec: &gen.EndpointSpec{
 			Type:        gen.EndpointTypeRef{Kind: ptr.To(gen.EndpointTypeRefKindClusterEndpointType), Name: "http-weighted"},
+			Address:     gen.EndpointAddress{Path: "/" + name},
 			BackendRefs: &refs,
 		},
 	}
@@ -213,6 +215,7 @@ func TestUpdateEndpointHandler(t *testing.T) {
 	t.Run("success - changes the split", func(t *testing.T) {
 		h := newHandlerWithEndpointService(newEndpointService(t, []client.Object{testEndpointObj("payments-api", "payments-v1", "payments-v2")}, &allowAllPDP{}))
 		body := newEndpointBody("ignored", 50, 50)
+		body.Spec.Address = gen.EndpointAddress{Path: "/payments-api"}
 		resp, err := h.UpdateEndpoint(ctx, gen.UpdateEndpointRequestObject{NamespaceName: testEPNs, EndpointName: "payments-api", Body: &body})
 		require.NoError(t, err)
 		typed, ok := resp.(gen.UpdateEndpoint200JSONResponse)
@@ -220,6 +223,15 @@ func TestUpdateEndpointHandler(t *testing.T) {
 		assert.Equal(t, "payments-api", typed.Metadata.Name, "the path name wins over the body's")
 		require.NotNil(t, typed.Spec.BackendRefs)
 		assert.Equal(t, int32(50), *(*typed.Spec.BackendRefs)[0].Weight)
+	})
+
+	t.Run("address change returns 400", func(t *testing.T) {
+		h := newHandlerWithEndpointService(newEndpointService(t, []client.Object{testEndpointObj("payments-api", "payments-v1")}, &allowAllPDP{}))
+		body := newEndpointBody("payments-api", 100)
+		body.Spec.Address = gen.EndpointAddress{Path: "/moved"}
+		resp, err := h.UpdateEndpoint(ctx, gen.UpdateEndpointRequestObject{NamespaceName: testEPNs, EndpointName: "payments-api", Body: &body})
+		require.NoError(t, err)
+		assert.IsType(t, gen.UpdateEndpoint400JSONResponse{}, resp)
 	})
 
 	t.Run("project change returns 400", func(t *testing.T) {

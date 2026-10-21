@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,9 +23,11 @@ import (
 )
 
 // updateServingClaim records, as status.serving, the routing this binding
-// serves once the data plane has accepted the current render: the backends
-// receiving traffic and the visibilities of the rendered routes. Component
-// ReleaseBindings read it to stop rendering their own routes for those slots.
+// serves once the data plane has accepted the current render: the component
+// URL it takes over, if it rendered one, and the visibilities of the rendered
+// routes. That component reads it to stop rendering its own routes for it; the
+// Endpoint's backends keep their own URLs. Without a take-over the claim holds
+// no URLs, so no component route is suppressed.
 //
 // The claim only changes when RoutesReady is True for this render, so it
 // holds steady while a later render is progressing or its backends are
@@ -35,7 +36,7 @@ func updateServingClaim(
 	binding *openchoreov1alpha1.EndpointReleaseBinding,
 	release *openchoreov1alpha1.EndpointRelease,
 	output *endpointpipeline.RenderOutput,
-	backends []endpointpipeline.Backend,
+	tookOver bool,
 ) {
 	if !meta.IsStatusConditionTrue(binding.Status.Conditions, string(ConditionRoutesReady)) {
 		return
@@ -43,8 +44,13 @@ func updateServingClaim(
 
 	next := &openchoreov1alpha1.EndpointServingClaim{
 		EndpointRelease: release.Name,
-		Backends:        servingSlots(backends),
 		Visibilities:    routeVisibilities(output),
+	}
+	if tookOver && release.Spec.TakeOver != nil {
+		next.URLs = []openchoreov1alpha1.EndpointBackendSlot{{
+			ComponentName: release.Spec.TakeOver.Component.Name,
+			Endpoint:      release.Spec.TakeOver.Component.Endpoint,
+		}}
 	}
 
 	if cur := binding.Status.Serving; cur != nil && !cur.Releasing {
@@ -56,28 +62,6 @@ func updateServingClaim(
 		next.Since = metav1.Now()
 	}
 	binding.Status.Serving = next
-}
-
-// servingSlots returns the distinct component workload endpoints that receive
-// traffic (non-zero weight), sorted for a stable status.
-func servingSlots(backends []endpointpipeline.Backend) []openchoreov1alpha1.EndpointBackendSlot {
-	slots := make([]openchoreov1alpha1.EndpointBackendSlot, 0, len(backends))
-	for _, b := range backends {
-		if b.Weight <= 0 {
-			continue
-		}
-		slot := openchoreov1alpha1.EndpointBackendSlot{ComponentName: b.ComponentName, Endpoint: b.Endpoint}
-		if !slices.Contains(slots, slot) {
-			slots = append(slots, slot)
-		}
-	}
-	sort.Slice(slots, func(i, j int) bool {
-		if slots[i].ComponentName != slots[j].ComponentName {
-			return slots[i].ComponentName < slots[j].ComponentName
-		}
-		return slots[i].Endpoint < slots[j].Endpoint
-	})
-	return slots
 }
 
 // routeVisibilities returns the distinct visibilities of the rendered Gateway
@@ -104,7 +88,7 @@ func routeVisibilities(output *endpointpipeline.RenderOutput) []openchoreov1alph
 
 func sameClaim(a, b *openchoreov1alpha1.EndpointServingClaim) bool {
 	return a.EndpointRelease == b.EndpointRelease &&
-		slices.Equal(a.Backends, b.Backends) &&
+		slices.Equal(a.URLs, b.URLs) &&
 		slices.Equal(a.Visibilities, b.Visibilities)
 }
 

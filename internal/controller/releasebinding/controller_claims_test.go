@@ -29,7 +29,10 @@ func claimsTestEndpoint(project string, components ...string) *openchoreov1alpha
 		},
 	}
 	for _, c := range components {
-		ep.Spec.BackendRefs = append(ep.Spec.BackendRefs, openchoreov1alpha1.EndpointBackendRef{ComponentName: c, Endpoint: "http"})
+		ep.Spec.BackendRefs = append(ep.Spec.BackendRefs, openchoreov1alpha1.EndpointBackendRef{Name: c, Component: &openchoreov1alpha1.EndpointComponentRef{Name: c, Endpoint: "http"}})
+	}
+	if len(components) > 0 {
+		ep.Spec.TakeOver = &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: components[0], Endpoint: "http"}}
 	}
 	return ep
 }
@@ -53,7 +56,7 @@ func servingClaim(releasing bool, components ...string) *openchoreov1alpha1.Endp
 		Releasing:       releasing,
 	}
 	for _, c := range components {
-		claim.Backends = append(claim.Backends, openchoreov1alpha1.EndpointBackendSlot{ComponentName: c, Endpoint: "http"})
+		claim.URLs = append(claim.URLs, openchoreov1alpha1.EndpointBackendSlot{ComponentName: c, Endpoint: "http"})
 	}
 	return claim
 }
@@ -93,7 +96,7 @@ func TestClaimedEndpoints(t *testing.T) {
 	t.Run("serving claim on this component is returned", func(t *testing.T) {
 		r := claimsTestReconciler(t,
 			claimsTestEndpoint("shop", "payments-v1", "payments-v2"),
-			claimsTestBinding("dev", servingClaim(false, "payments-v1", "payments-v2")),
+			claimsTestBinding("dev", servingClaim(false, "payments-v1")),
 		)
 		claims, err := r.claimedEndpoints(ctx, rb)
 		require.NoError(t, err)
@@ -131,6 +134,13 @@ func TestClaimedEndpoints(t *testing.T) {
 			name: "claim that serves only another component",
 			objs: []client.Object{
 				claimsTestEndpoint("shop", "payments-v1", "payments-v2"),
+				claimsTestBinding("dev", servingClaim(false, "payments-v2")),
+			},
+		},
+		{
+			name: "Endpoint that routes to this component but serves another component's URL",
+			objs: []client.Object{
+				claimsTestEndpoint("shop", "payments-v2", "payments-v1"),
 				claimsTestBinding("dev", servingClaim(false, "payments-v2")),
 			},
 		},

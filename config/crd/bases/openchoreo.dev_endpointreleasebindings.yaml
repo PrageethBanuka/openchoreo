@@ -67,6 +67,39 @@ spec:
               EndpointReleaseBindingSpec defines the desired state of EndpointReleaseBinding.
               Pins an EndpointRelease to an Environment and carries per-env overrides.
             properties:
+              backendOverrides:
+                description: |-
+                  BackendOverrides sets environment-specific values for the release's
+                  backends, matched by name. Today it sets an external backend's URL, so
+                  staging can call a staging service while the release stays the same.
+                items:
+                  description: EndpointBackendOverride sets an environment-specific
+                    value for one backend.
+                  properties:
+                    external:
+                      description: External overrides an external backend's URL in
+                        this environment.
+                      properties:
+                        url:
+                          description: URL is the service's base URL, for example
+                            https://legacy.example.com.
+                          maxLength: 2048
+                          pattern: ^https?://[a-zA-Z0-9]([-a-zA-Z0-9.]*[a-zA-Z0-9])?(:[0-9]{1,5})?(/.*)?$
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: Name is the backend's name in the release.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               endpointRelease:
                 description: |-
                   EndpointRelease is the name of the EndpointRelease pinned by this binding.
@@ -88,6 +121,14 @@ spec:
                 x-kubernetes-validations:
                 - message: spec.environment is immutable
                   rule: self == oldSelf
+              hostname:
+                description: |-
+                  Hostname overrides the Endpoint's address.hostname in this environment,
+                  for example payments.staging.example.com. It must match the
+                  EndpointType's allowedHostnames.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$
+                type: string
               owner:
                 description: Owner identifies the endpoint and project this EndpointReleaseBinding
                   belongs to.
@@ -116,6 +157,35 @@ spec:
             description: EndpointReleaseBindingStatus defines the observed state of
               EndpointReleaseBinding.
             properties:
+              addresses:
+                description: |-
+                  Addresses are the host and path pairs this binding serves in its
+                  environment, recorded once resolved. Bindings compare them to keep one
+                  route per address.
+                items:
+                  description: EndpointResolvedAddress is an address a binding serves
+                    in its environment.
+                  properties:
+                    host:
+                      description: Host is the hostname clients call.
+                      type: string
+                    kind:
+                      description: |-
+                        Kind is Address for the Endpoint's own address and TakeOver for a
+                        taken-over component URL.
+                      enum:
+                      - Address
+                      - TakeOver
+                      type: string
+                    path:
+                      description: Path is the path prefix clients call.
+                      type: string
+                  required:
+                  - host
+                  - kind
+                  - path
+                  type: object
+                type: array
               backends:
                 description: |-
                   Backends holds the resolution result of each backendRef for this binding's
@@ -127,12 +197,19 @@ spec:
                     environment, populated by the binding controller.
                   properties:
                     componentName:
-                      description: ComponentName is the name of the backend Component.
-                      minLength: 1
+                      description: ComponentName is the name of the backend Component,
+                        for a component backend.
                       type: string
                     endpoint:
-                      description: Endpoint is the name of the workload endpoint on
-                        the backend Component.
+                      description: Endpoint is the name of the workload endpoint,
+                        for a component backend.
+                      type: string
+                    externalURL:
+                      description: ExternalURL is the URL used in this environment,
+                        for an external backend.
+                      type: string
+                    name:
+                      description: Name is the backend's name in the release.
                       minLength: 1
                       type: string
                     reason:
@@ -170,14 +247,12 @@ spec:
                       format: int32
                       type: integer
                   required:
-                  - componentName
-                  - endpoint
+                  - name
                   - resolved
                   type: object
                 type: array
                 x-kubernetes-list-map-keys:
-                - componentName
-                - endpoint
+                - name
                 x-kubernetes-list-type: map
               conditions:
                 description: |-
@@ -408,10 +483,26 @@ spec:
                   rendered route is accepted, so it holds steady while a later render is
                   still progressing or its backends are unresolved.
                 properties:
-                  backends:
+                  endpointRelease:
+                    description: EndpointRelease is the release whose rendered routes
+                      were accepted.
+                    minLength: 1
+                    type: string
+                  releasing:
                     description: |-
-                      Backends are the component workload endpoints receiving traffic (non-zero
-                      weight) through the accepted routes.
+                      Releasing is set while the binding is being deleted. Component
+                      ReleaseBindings resume rendering their own routes; this binding keeps its
+                      route until they are live again, so traffic is never left without a route.
+                    type: boolean
+                  since:
+                    description: Since is when this claim was first established.
+                    format: date-time
+                    type: string
+                  urls:
+                    description: |-
+                      URLs are the component workload endpoints whose URLs the accepted routes
+                      serve: the Endpoint's spec.url. Those components stop rendering their own
+                      routes for them; other backends keep their own URLs.
                     items:
                       description: EndpointBackendSlot identifies a component workload
                         endpoint.
@@ -434,21 +525,6 @@ spec:
                     - componentName
                     - endpoint
                     x-kubernetes-list-type: map
-                  endpointRelease:
-                    description: EndpointRelease is the release whose rendered routes
-                      were accepted.
-                    minLength: 1
-                    type: string
-                  releasing:
-                    description: |-
-                      Releasing is set while the binding is being deleted. Component
-                      ReleaseBindings resume rendering their own routes; this binding keeps its
-                      route until they are live again, so traffic is never left without a route.
-                    type: boolean
-                  since:
-                    description: Since is when this claim was first established.
-                    format: date-time
-                    type: string
                   visibilities:
                     description: |-
                       Visibilities are the gateway visibilities the accepted routes serve, from

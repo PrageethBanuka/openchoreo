@@ -56,13 +56,39 @@ func (r *Reconciler) listEndpointsForClusterEndpointType(ctx context.Context, ob
 }
 
 // listEndpointsForComponent returns reconcile requests for Endpoints in the
-// Component's namespace that list it as a backend, so a BackendNotFound
-// condition clears once the Component is created.
+// Component's namespace that reference it, as a backend or as the component
+// whose URL they serve, so a BackendNotFound condition clears once the
+// Component is created.
 func (r *Reconciler) listEndpointsForComponent(ctx context.Context, obj client.Object) []reconcile.Request {
 	comp := obj.(*openchoreov1alpha1.Component)
 	indexKey := controller.MakeEndpointBackendComponentKey(comp.Spec.Owner.ProjectName, comp.Name)
 	return r.requestsForIndex(ctx, controller.IndexKeyEndpointBackendComponent, indexKey,
 		client.InNamespace(comp.Namespace))
+}
+
+// listEndpointsSharingURL returns reconcile requests for the other Endpoints
+// claiming the same address or take-over as the given one, so an Endpoint held
+// back by AddressInUse or TakeOverInUse takes over once the holder is deleted.
+func (r *Reconciler) listEndpointsSharingURL(ctx context.Context, obj client.Object) []reconcile.Request {
+	ep := obj.(*openchoreov1alpha1.Endpoint)
+	var endpoints openchoreov1alpha1.EndpointList
+	if err := r.List(ctx, &endpoints); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "Failed to list Endpoints with the same claims", "endpoint", ep.Name)
+		return nil
+	}
+	var requests []reconcile.Request
+	for i := range endpoints.Items {
+		other := &endpoints.Items[i]
+		if other.Name == ep.Name && other.Namespace == ep.Namespace {
+			continue
+		}
+		if controller.SameEndpointAddress(ep, other) || controller.SameEndpointTakeOver(ep, other) {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: other.Name, Namespace: other.Namespace},
+			})
+		}
+	}
+	return requests
 }
 
 // requestsForIndex lists Endpoints by the given field index and converts them

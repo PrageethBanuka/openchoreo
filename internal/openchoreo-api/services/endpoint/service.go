@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
+	"github.com/openchoreo/openchoreo/internal/controller"
 	"github.com/openchoreo/openchoreo/internal/labels"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
 	projectsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/project"
@@ -126,6 +127,14 @@ func (s *endpointService) UpdateEndpoint(ctx context.Context, namespaceName stri
 	if ep.Spec.Owner.ProjectName != existing.Spec.Owner.ProjectName {
 		return nil, &services.ValidationError{Msg: "spec.owner.projectName is immutable"}
 	}
+	// An update that leaves the address out keeps it; changing it is refused,
+	// since the address is the Endpoint's identity.
+	if ep.Spec.Address == (openchoreov1alpha1.EndpointAddress{}) {
+		ep.Spec.Address = existing.Spec.Address
+	}
+	if ep.Spec.Address != existing.Spec.Address {
+		return nil, &services.ValidationError{Msg: "spec.address is immutable; create a new Endpoint to serve another address"}
+	}
 
 	// An update that leaves reclaimPolicy out keeps the current one rather than
 	// falling back to the CRD default.
@@ -191,10 +200,14 @@ func (s *endpointService) ListEndpoints(ctx context.Context, namespaceName, proj
 	return services.PreFilteredList(s.listEndpointsResource(namespaceName), filters...)(ctx, opts)
 }
 
-// routesTo reports whether the Endpoint has a backendRef to the component.
+// routesTo reports whether the Endpoint has a backendRef to the component or
+// takes over one of its URLs.
 func routesTo(ep openchoreov1alpha1.Endpoint, componentName string) bool {
+	if t := controller.TakenOver(&ep); t != nil && t.Name == componentName {
+		return true
+	}
 	for _, ref := range ep.Spec.BackendRefs {
-		if ref.ComponentName == componentName {
+		if name, _, ok := controller.BackendComponent(ref); ok && name == componentName {
 			return true
 		}
 	}

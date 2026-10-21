@@ -76,7 +76,7 @@ func (r *Reconciler) releaseClaim(
 		return true, ctrl.Result{}, nil
 	}
 
-	for _, slot := range serving.Backends {
+	for _, slot := range serving.URLs {
 		live, waitingFor, err := r.componentRoutesLive(ctx, binding, slot, serving.Visibilities)
 		if err != nil {
 			return false, ctrl.Result{}, err

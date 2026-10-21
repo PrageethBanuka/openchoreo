@@ -64,8 +64,8 @@ var _ = Describe("Endpoint Controller", func() {
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, comp) })
 	}
 
-	// createEndpoint creates an Endpoint with the finalizer pre-set so a single
-	// Reconcile call runs the main reconcile path.
+	// createEndpoint creates an Endpoint at address /<name>, with the
+	// finalizer pre-set so a single Reconcile call runs the main reconcile path.
 	createEndpoint := func(name string, typeRef openchoreov1alpha1.EndpointTypeRef,
 		refs ...openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.Endpoint {
 		ep := &openchoreov1alpha1.Endpoint{
@@ -77,6 +77,7 @@ var _ = Describe("Endpoint Controller", func() {
 			Spec: openchoreov1alpha1.EndpointSpec{
 				Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: project},
 				Type:        typeRef,
+				Address:     openchoreov1alpha1.EndpointAddress{Path: "/" + name},
 				BackendRefs: refs,
 			},
 		}
@@ -109,7 +110,7 @@ var _ = Describe("Endpoint Controller", func() {
 	It("sets Ready=False, Reason=EndpointTypeNotFound when the referenced type does not exist", func() {
 		ep := createEndpoint("ep-missing-type",
 			openchoreov1alpha1.EndpointTypeRef{Name: "does-not-exist"},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "payments-v1", Endpoint: "api"})
+			openchoreov1alpha1.EndpointBackendRef{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}})
 
 		updated := reconcileAndGet(ep)
 
@@ -128,8 +129,8 @@ var _ = Describe("Endpoint Controller", func() {
 				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
 				Name: "cet-backend-check",
 			},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "backend-absent", Endpoint: "api"},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "backend-other-project", Endpoint: "api"})
+			openchoreov1alpha1.EndpointBackendRef{Name: "backend-absent", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "backend-absent", Endpoint: "api"}},
+			openchoreov1alpha1.EndpointBackendRef{Name: "backend-other-project", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "backend-other-project", Endpoint: "api"}})
 
 		updated := reconcileAndGet(ep)
 
@@ -150,8 +151,8 @@ var _ = Describe("Endpoint Controller", func() {
 				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
 				Name: "cet-staged",
 			},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "staged-v1", Endpoint: "api", Weight: ptr.To[int32](100)},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "staged-v2-not-yet", Endpoint: "api", Weight: ptr.To[int32](0)})
+			openchoreov1alpha1.EndpointBackendRef{Name: "staged-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "staged-v1", Endpoint: "api"}, Weight: ptr.To[int32](100)},
+			openchoreov1alpha1.EndpointBackendRef{Name: "staged-v2-not-yet", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "staged-v2-not-yet", Endpoint: "api"}, Weight: ptr.To[int32](0)})
 
 		updated := reconcileAndGet(ep)
 
@@ -169,8 +170,8 @@ var _ = Describe("Endpoint Controller", func() {
 				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
 				Name: "cet-release",
 			},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "release-v1", Endpoint: "api", Weight: ptr.To[int32](90)},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "release-v2", Endpoint: "api", Weight: ptr.To[int32](10)})
+			openchoreov1alpha1.EndpointBackendRef{Name: "release-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "release-v1", Endpoint: "api"}, Weight: ptr.To[int32](90)},
+			openchoreov1alpha1.EndpointBackendRef{Name: "release-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "release-v2", Endpoint: "api"}, Weight: ptr.To[int32](10)})
 
 		By("cutting the first release")
 		updated := reconcileAndGet(ep)
@@ -223,7 +224,7 @@ var _ = Describe("Endpoint Controller", func() {
 
 		ep := createEndpoint("ep-namespaced",
 			openchoreov1alpha1.EndpointTypeRef{Name: "et-namespaced"},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "namespaced-v1", Endpoint: "api"})
+			openchoreov1alpha1.EndpointBackendRef{Name: "namespaced-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "namespaced-v1", Endpoint: "api"}})
 
 		updated := reconcileAndGet(ep)
 		Expect(readyCondition(updated).Status).To(Equal(metav1.ConditionTrue))
@@ -242,7 +243,7 @@ var _ = Describe("Endpoint Controller", func() {
 				Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
 				Name: "cet-immutable",
 			},
-			openchoreov1alpha1.EndpointBackendRef{ComponentName: "anything", Endpoint: "api"})
+			openchoreov1alpha1.EndpointBackendRef{Name: "anything", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "anything", Endpoint: "api"}})
 
 		latest := &openchoreov1alpha1.Endpoint{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ep), latest)).To(Succeed())
@@ -250,5 +251,139 @@ var _ = Describe("Endpoint Controller", func() {
 		err := k8sClient.Update(ctx, latest)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("spec.type cannot be changed after creation"))
+	})
+
+	// createEndpointWith creates an Endpoint with the given address and
+	// take-over, for the claim tests.
+	createEndpointWith := func(name string, typeRef openchoreov1alpha1.EndpointTypeRef,
+		address openchoreov1alpha1.EndpointAddress, takeOver *openchoreov1alpha1.EndpointTakeOver,
+		refs ...openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.Endpoint {
+		ep := &openchoreov1alpha1.Endpoint{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Finalizers: []string{EndpointFinalizer}},
+			Spec: openchoreov1alpha1.EndpointSpec{
+				Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: project},
+				Type:        typeRef,
+				Address:     address,
+				TakeOver:    takeOver,
+				BackendRefs: refs,
+			},
+		}
+		Expect(k8sClient.Create(ctx, ep)).To(Succeed())
+		DeferCleanup(func() {
+			latest := &openchoreov1alpha1.Endpoint{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(ep), latest); err == nil {
+				latest.Finalizers = nil
+				_ = k8sClient.Update(ctx, latest)
+				_ = k8sClient.Delete(ctx, latest)
+			}
+		})
+		return ep
+	}
+	componentBackend := func(name string, weight int32) openchoreov1alpha1.EndpointBackendRef {
+		return openchoreov1alpha1.EndpointBackendRef{
+			Name:      name,
+			Component: &openchoreov1alpha1.EndpointComponentRef{Name: name, Endpoint: "api"},
+			Weight:    ptr.To(weight),
+		}
+	}
+	takeOverOf := func(component string) *openchoreov1alpha1.EndpointTakeOver {
+		return &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: component, Endpoint: "api"}}
+	}
+	cet := func(name string) openchoreov1alpha1.EndpointTypeRef {
+		createClusterEndpointType(name)
+		return openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: name}
+	}
+
+	It("rejects changing spec.address, and changing but not removing spec.takeOver", func() {
+		ep := createEndpointWith("ep-immutable-address", cet("cet-immutable-address"),
+			openchoreov1alpha1.EndpointAddress{Path: "/fixed"}, takeOverOf("anything"), componentBackend("anything", 1))
+
+		latest := &openchoreov1alpha1.Endpoint{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ep), latest)).To(Succeed())
+		moved := latest.DeepCopy()
+		moved.Spec.Address.Path = "/moved"
+		err := k8sClient.Update(ctx, moved)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.address cannot be changed after creation"))
+
+		changed := latest.DeepCopy()
+		changed.Spec.TakeOver = takeOverOf("something-else")
+		err = k8sClient.Update(ctx, changed)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.takeOver can be added or removed but not changed"))
+
+		removed := latest.DeepCopy()
+		removed.Spec.TakeOver = nil
+		Expect(k8sClient.Update(ctx, removed)).To(Succeed())
+	})
+
+	It("requires the taken-over component even when it is not a weighted backend", func() {
+		createComponent("takeover-backend", project)
+		ep := createEndpointWith("ep-takeover-missing", cet("cet-takeover-missing"),
+			openchoreov1alpha1.EndpointAddress{Path: "/takeover-missing"}, takeOverOf("takeover-gone"),
+			componentBackend("takeover-backend", 100))
+
+		cond := readyCondition(reconcileAndGet(ep))
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(ReasonBackendNotFound)))
+		Expect(cond.Message).To(ContainSubstring("takeover-gone"))
+	})
+
+	It("does not check external backends against Components", func() {
+		createComponent("ext-v1", project)
+		ep := createEndpointWith("ep-external", cet("cet-external"),
+			openchoreov1alpha1.EndpointAddress{Path: "/external"}, nil,
+			componentBackend("ext-v1", 90),
+			openchoreov1alpha1.EndpointBackendRef{
+				Name: "legacy", External: &openchoreov1alpha1.EndpointExternalRef{URL: "https://legacy.example.com"}, Weight: ptr.To[int32](10),
+			})
+		updated := reconcileAndGet(ep)
+		Expect(readyCondition(updated).Status).To(Equal(metav1.ConditionTrue))
+		Expect(updated.Status.LatestRelease).NotTo(BeNil())
+	})
+
+	It("refuses a split where every backend has weight 0", func() {
+		createComponent("zero-v1", project)
+		ep := createEndpointWith("ep-zero", cet("cet-zero"),
+			openchoreov1alpha1.EndpointAddress{Path: "/zero"}, nil, componentBackend("zero-v1", 0))
+		cond := readyCondition(reconcileAndGet(ep))
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(ReasonNoWeightedBackend)))
+	})
+
+	It("holds back a newer Endpoint claiming an address another Endpoint already serves", func() {
+		createComponent("conflict-v1", project)
+		typeRef := cet("cet-address-conflict")
+		addr := openchoreov1alpha1.EndpointAddress{Path: "/conflict"}
+		holder := createEndpointWith("ep-conflict-a", typeRef, addr, nil, componentBackend("conflict-v1", 100))
+		Expect(readyCondition(reconcileAndGet(holder)).Status).To(Equal(metav1.ConditionTrue))
+
+		// The webhook is not running in envtest, which is the case the
+		// controller backstop exists for.
+		newer := createEndpointWith("ep-conflict-b", typeRef, addr, nil, componentBackend("conflict-v1", 100))
+		updated := reconcileAndGet(newer)
+		cond := readyCondition(updated)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(ReasonAddressInUse)))
+		Expect(cond.Message).To(ContainSubstring("ep-conflict-a"))
+		Expect(updated.Status.LatestRelease).To(BeNil(), "the held-back Endpoint cuts no release")
+
+		By("the holder keeps serving")
+		Expect(readyCondition(reconcileAndGet(holder)).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("holds back a newer Endpoint taking over a URL another Endpoint already takes over", func() {
+		createComponent("takeover-v1", project)
+		typeRef := cet("cet-takeover-conflict")
+		holder := createEndpointWith("ep-takeover-a", typeRef, openchoreov1alpha1.EndpointAddress{Path: "/takeover-a"},
+			takeOverOf("takeover-v1"), componentBackend("takeover-v1", 100))
+		Expect(readyCondition(reconcileAndGet(holder)).Status).To(Equal(metav1.ConditionTrue))
+
+		newer := createEndpointWith("ep-takeover-b", typeRef, openchoreov1alpha1.EndpointAddress{Path: "/takeover-b"},
+			takeOverOf("takeover-v1"), componentBackend("takeover-v1", 100))
+		cond := readyCondition(reconcileAndGet(newer))
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(string(ReasonTakeOverInUse)))
+		Expect(cond.Message).To(ContainSubstring(`Endpoint "ep-takeover-a"`))
 	})
 })

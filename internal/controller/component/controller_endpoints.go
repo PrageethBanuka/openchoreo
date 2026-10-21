@@ -68,9 +68,9 @@ func (r *Reconciler) reconcileExposedEndpoints(ctx context.Context, comp *opench
 		case err != nil:
 			return fmt.Errorf("get endpoint %s: %w", name, err)
 		case existing.Spec.Owner.ProjectName != comp.Spec.Owner.ProjectName ||
-			!controller.HasEndpointBackend(existing, comp.Name, key):
+			!controller.ServesEndpointURL(existing, comp.Name, key):
 			reason = ReasonExposeConflict
-			problems = append(problems, fmt.Sprintf("%s: Endpoint %q exists and does not route to this component", key, name))
+			problems = append(problems, fmt.Sprintf("%s: Endpoint %q exists and does not serve this endpoint's URL", key, name))
 		case !controller.EndpointTypeRefEqual(existing.Spec.Type, *wep.EndpointType):
 			reason = ReasonEndpointTypeMismatch
 			problems = append(problems, fmt.Sprintf("%s: Endpoint %q has type %s %q; an Endpoint's type cannot change",
@@ -103,9 +103,18 @@ func (r *Reconciler) createExposedEndpoint(ctx context.Context, comp *openchoreo
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: comp.Spec.Owner.ProjectName},
 			Type:  *wep.EndpointType,
-			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: comp.Name, Endpoint: key, Weight: ptr.To[int32](100)},
+			// The address is the URL the component already serves for this
+			// endpoint, and the take-over moves that URL to the Endpoint, so
+			// clients keep calling the same URL.
+			Address: openchoreov1alpha1.EndpointAddress{Path: "/" + comp.Name + "-" + key},
+			TakeOver: &openchoreov1alpha1.EndpointTakeOver{
+				Component: openchoreov1alpha1.EndpointComponentRef{Name: comp.Name, Endpoint: key},
 			},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{
+				Name:      comp.Name,
+				Component: &openchoreov1alpha1.EndpointComponentRef{Name: comp.Name, Endpoint: key},
+				Weight:    ptr.To[int32](100),
+			}},
 			ReclaimPolicy: openchoreov1alpha1.EndpointReclaimPolicyDelete,
 		},
 	}
@@ -152,8 +161,9 @@ func (r *Reconciler) updateEndpointIndex(ctx context.Context, comp *openchoreov1
 }
 
 // stillRouted returns a message naming where the component still receives
-// traffic through an Endpoint that has other backends to move it to, or ""
-// when deleting it breaks no route that could be kept.
+// traffic through an Endpoint that has other backends to move it to, or has
+// its URL served to other backends, or "" when deleting it breaks no route
+// that could be kept.
 func (r *Reconciler) stillRouted(ctx context.Context, comp *openchoreov1alpha1.Component) (string, error) {
 	usages, err := controller.ComponentEndpointUsage(ctx, r.Client, comp.Namespace, comp.Spec.Owner.ProjectName, comp.Name)
 	if err != nil {
@@ -163,18 +173,14 @@ func (r *Reconciler) stillRouted(ctx context.Context, comp *openchoreov1alpha1.C
 	if len(routed) == 0 {
 		return "", nil
 	}
-	parts := make([]string, 0, len(routed))
-	for _, u := range routed {
-		parts = append(parts, fmt.Sprintf("%s in %s (weight %d)", u.Endpoint, u.Environment, u.Weight))
-	}
-	return "Still receives traffic through " + strings.Join(parts, ", ") +
-		"; move its weight to 0 and roll out before deleting", nil
+	return "Still " + controller.StillRoutedReason(routed), nil
 }
 
 // pruneFromEndpoints removes the component from the backends of every Endpoint
-// in its project. It runs during deletion, once stillRouted has confirmed no
-// Endpoint sends the component traffic, so the Endpoints keep serving through
-// their other backends. An Endpoint left with no backends is handled by its
+// in its project, and drops a take-over of one of its URLs. It runs during
+// deletion, once stillRouted has confirmed no Endpoint still needs the
+// component, so the Endpoints keep serving their own addresses through their
+// other backends. An Endpoint left with no backends is handled by its
 // reclaimPolicy in the Endpoint controller.
 func (r *Reconciler) pruneFromEndpoints(ctx context.Context, comp *openchoreov1alpha1.Component) error {
 	var endpoints openchoreov1alpha1.EndpointList
@@ -188,49 +194,52 @@ func (r *Reconciler) pruneFromEndpoints(ctx context.Context, comp *openchoreov1a
 		}
 		kept := make([]openchoreov1alpha1.EndpointBackendRef, 0, len(ep.Spec.BackendRefs))
 		for _, ref := range ep.Spec.BackendRefs {
-			if ref.ComponentName != comp.Name {
+			if name, _, ok := controller.BackendComponent(ref); !ok || name != comp.Name {
 				kept = append(kept, ref)
 			}
 		}
-		if len(kept) == len(ep.Spec.BackendRefs) {
+		takenOver := controller.TakenOver(ep)
+		dropTakeOver := takenOver != nil && takenOver.Name == comp.Name
+		if len(kept) == len(ep.Spec.BackendRefs) && !dropTakeOver {
 			continue
 		}
 		patch := client.MergeFrom(ep.DeepCopy())
 		ep.Spec.BackendRefs = kept
+		if dropTakeOver {
+			ep.Spec.TakeOver = nil
+		}
 		if err := r.Patch(ctx, ep, patch); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("remove %s from endpoint %s: %w", comp.Name, ep.Name, err)
 		}
-		log.FromContext(ctx).Info("Removed deleted component from Endpoint backends", "endpoint", ep.Name)
+		log.FromContext(ctx).Info("Removed deleted component from Endpoint", "endpoint", ep.Name,
+			"droppedTakeOver", dropTakeOver)
 	}
 	return nil
 }
 
-// listComponentsForEndpoint maps an Endpoint to the Components in its backendRefs.
+// listComponentsForEndpoint maps an Endpoint to the Components it references:
+// its component backends and the component whose URL it takes over.
 func (r *Reconciler) listComponentsForEndpoint(_ context.Context, obj client.Object) []ctrl.Request {
 	ep := obj.(*openchoreov1alpha1.Endpoint)
-	return componentRequests(ep.Namespace, ep.Spec.BackendRefs)
+	return componentRequests(ep)
 }
 
 // listComponentsForEndpointReleaseBinding maps an EndpointReleaseBinding to the
-// backend Components of its Endpoint, whose reverse index carries its weights.
+// Components its Endpoint references, whose reverse index carries its weights.
 func (r *Reconciler) listComponentsForEndpointReleaseBinding(ctx context.Context, obj client.Object) []ctrl.Request {
 	binding := obj.(*openchoreov1alpha1.EndpointReleaseBinding)
 	ep := &openchoreov1alpha1.Endpoint{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: binding.Namespace, Name: binding.Spec.Owner.EndpointName}, ep); err != nil {
 		return nil
 	}
-	return componentRequests(ep.Namespace, ep.Spec.BackendRefs)
+	return componentRequests(ep)
 }
 
-func componentRequests(namespace string, refs []openchoreov1alpha1.EndpointBackendRef) []ctrl.Request {
-	seen := map[string]bool{}
-	var reqs []ctrl.Request
-	for _, ref := range refs {
-		if seen[ref.ComponentName] {
-			continue
-		}
-		seen[ref.ComponentName] = true
-		reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: ref.ComponentName}})
+func componentRequests(ep *openchoreov1alpha1.Endpoint) []ctrl.Request {
+	names := controller.EndpointComponentNames(ep)
+	reqs := make([]ctrl.Request, 0, len(names))
+	for _, name := range names {
+		reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ep.Namespace, Name: name}})
 	}
 	return reqs
 }

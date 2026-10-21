@@ -35,7 +35,8 @@ type endpointClaim struct {
 }
 
 // claimedEndpoints returns, per workload endpoint name, the Endpoint claims
-// on this component in the binding's environment. A claim is the
+// on this component in the binding's environment: the Endpoints serving one
+// of its URLs. A claim is the
 // status.serving record of an EndpointReleaseBinding: present once the
 // Endpoint's route has been accepted, absent or marked releasing while the
 // binding hands traffic back. Endpoints and their bindings are read from the
@@ -58,11 +59,8 @@ func (r *Reconciler) claimedEndpoints(
 		if ep.Spec.Owner.ProjectName != project {
 			continue
 		}
-		for _, ref := range ep.Spec.BackendRefs {
-			if ref.ComponentName == component {
-				routing[ep.Name] = true
-				break
-			}
+		if t := controller.TakenOver(ep); t != nil && t.Name == component {
+			routing[ep.Name] = true
 		}
 	}
 	if len(routing) == 0 {
@@ -82,7 +80,7 @@ func (r *Reconciler) claimedEndpoints(
 			!routing[erb.Spec.Owner.EndpointName] || serving == nil || serving.Releasing {
 			continue
 		}
-		for _, slot := range serving.Backends {
+		for _, slot := range serving.URLs {
 			if slot.ComponentName != component {
 				continue
 			}
@@ -223,7 +221,7 @@ func (r *Reconciler) releaseBindingsForEndpointClaim(ctx context.Context, obj cl
 		return nil
 	}
 	var requests []reconcile.Request
-	for _, slot := range erb.Status.Serving.Backends {
+	for _, slot := range erb.Status.Serving.URLs {
 		var rbList openchoreov1alpha1.ReleaseBindingList
 		if err := r.List(ctx, &rbList, client.InNamespace(erb.Namespace),
 			client.MatchingFields{controller.IndexKeyReleaseBindingOwnerEnv: controller.MakeReleaseBindingOwnerEnvKey(

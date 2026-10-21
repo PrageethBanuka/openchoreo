@@ -34,7 +34,7 @@ var _ = Describe("Finalizer", func() {
 				Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "p"},
 				Type:  openchoreov1alpha1.EndpointTypeRef{Name: "et"},
 				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-					{ComponentName: "c", Endpoint: "api"},
+					{Name: "c", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "c", Endpoint: "api"}},
 				},
 			},
 		}

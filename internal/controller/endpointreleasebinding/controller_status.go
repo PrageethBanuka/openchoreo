@@ -42,6 +42,11 @@ func resolveURLs(
 		if kind == "" || !endpointurl.RouteKindCompat[kind][protocol] {
 			continue
 		}
+		// The invoke URL is the Endpoint's own address; a taken-over URL is
+		// only a bridge for old clients.
+		if obj.GetLabels()[labels.LabelKeyEndpointRoute] == "takeover" {
+			continue
+		}
 
 		visibility := openchoreov1alpha1.EndpointVisibility(obj.GetLabels()[labels.LabelKeyEndpointVisibility])
 		if visibility == "" {

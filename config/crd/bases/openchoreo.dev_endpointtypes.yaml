@@ -49,6 +49,28 @@ spec:
           spec:
             description: EndpointTypeSpec defines the desired state of EndpointType.
             properties:
+              allowedBackendKinds:
+                default:
+                - Component
+                description: |-
+                  AllowedBackendKinds lists the backend kinds Endpoints of this type may use.
+                  External backends send traffic outside the cluster, so they must be
+                  allowed explicitly.
+                items:
+                  description: EndpointBackendKind is the kind of an Endpoint backend.
+                  enum:
+                  - Component
+                  - External
+                  type: string
+                type: array
+              allowedHostnames:
+                description: |-
+                  AllowedHostnames lists the hostnames Endpoints of this type may use as
+                  their own hostname. A leading "*." matches any one label, for example
+                  "*.example.com". Empty means Endpoints use the environment's gateway host.
+                items:
+                  type: string
+                type: array
               environmentConfigs:
                 description: |-
                   EnvironmentConfigs defines the per-env schema.

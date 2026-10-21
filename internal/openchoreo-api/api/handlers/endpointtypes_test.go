@@ -112,7 +112,7 @@ func TestEndpointReleaseHandlers(t *testing.T) {
 					Name: "http-weighted",
 					Spec: openchoreov1alpha1.EndpointTypeSpec{Resources: endpointRouteTemplate()},
 				},
-				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "http"}},
+				BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}},
 			},
 		}
 	}

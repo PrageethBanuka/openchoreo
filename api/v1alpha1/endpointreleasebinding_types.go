@@ -36,6 +36,48 @@ type EndpointReleaseBindingSpec struct {
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	EndpointTypeEnvironmentConfigs *runtime.RawExtension `json:"endpointTypeEnvironmentConfigs,omitempty"`
+
+	// Hostname overrides the Endpoint's address.hostname in this environment,
+	// for example payments.staging.example.com. It must match the
+	// EndpointType's allowedHostnames.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$`
+	Hostname string `json:"hostname,omitempty"`
+
+	// BackendOverrides sets environment-specific values for the release's
+	// backends, matched by name. Today it sets an external backend's URL, so
+	// staging can call a staging service while the release stays the same.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	BackendOverrides []EndpointBackendOverride `json:"backendOverrides,omitempty"`
+}
+
+// EndpointBackendOverride sets an environment-specific value for one backend.
+type EndpointBackendOverride struct {
+	// Name is the backend's name in the release.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// External overrides an external backend's URL in this environment.
+	// +optional
+	External *EndpointExternalRef `json:"external,omitempty"`
+}
+
+// EndpointResolvedAddress is an address a binding serves in its environment.
+type EndpointResolvedAddress struct {
+	// Kind is Address for the Endpoint's own address and TakeOver for a
+	// taken-over component URL.
+	// +kubebuilder:validation:Enum=Address;TakeOver
+	Kind string `json:"kind"`
+
+	// Host is the hostname clients call.
+	Host string `json:"host"`
+
+	// Path is the path prefix clients call.
+	Path string `json:"path"`
 }
 
 // EndpointReleaseBindingOwner identifies the endpoint this EndpointReleaseBinding belongs to.
@@ -68,8 +110,7 @@ type EndpointReleaseBindingStatus struct {
 	// reported with resolved=false rather than silently receiving its share of traffic.
 	// +optional
 	// +listType=map
-	// +listMapKey=componentName
-	// +listMapKey=endpoint
+	// +listMapKey=name
 	Backends []ResolvedEndpointBackend `json:"backends,omitempty"`
 
 	// InvokeURL is the primary resolved URL for this endpoint in the environment,
@@ -93,6 +134,12 @@ type EndpointReleaseBindingStatus struct {
 	// still progressing or its backends are unresolved.
 	// +optional
 	Serving *EndpointServingClaim `json:"serving,omitempty"`
+
+	// Addresses are the host and path pairs this binding serves in its
+	// environment, recorded once resolved. Bindings compare them to keep one
+	// route per address.
+	// +optional
+	Addresses []EndpointResolvedAddress `json:"addresses,omitempty"`
 }
 
 // EndpointServingClaim is the routing an EndpointReleaseBinding is serving in
@@ -103,13 +150,14 @@ type EndpointServingClaim struct {
 	// +kubebuilder:validation:MinLength=1
 	EndpointRelease string `json:"endpointRelease"`
 
-	// Backends are the component workload endpoints receiving traffic (non-zero
-	// weight) through the accepted routes.
+	// URLs are the component workload endpoints whose URLs the accepted routes
+	// serve: the Endpoint's spec.url. Those components stop rendering their own
+	// routes for them; other backends keep their own URLs.
 	// +optional
 	// +listType=map
 	// +listMapKey=componentName
 	// +listMapKey=endpoint
-	Backends []EndpointBackendSlot `json:"backends,omitempty"`
+	URLs []EndpointBackendSlot `json:"urls,omitempty"`
 
 	// Visibilities are the gateway visibilities the accepted routes serve, from
 	// their openchoreo.dev/endpoint-visibility label (external by default).
@@ -145,15 +193,22 @@ type EndpointBackendSlot struct {
 // ResolvedEndpointBackend is the resolution of a single EndpointBackendRef in an
 // environment, populated by the binding controller.
 type ResolvedEndpointBackend struct {
-	// ComponentName is the name of the backend Component.
+	// Name is the backend's name in the release.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	ComponentName string `json:"componentName"`
+	Name string `json:"name"`
 
-	// Endpoint is the name of the workload endpoint on the backend Component.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Endpoint string `json:"endpoint"`
+	// ComponentName is the name of the backend Component, for a component backend.
+	// +optional
+	ComponentName string `json:"componentName,omitempty"`
+
+	// Endpoint is the name of the workload endpoint, for a component backend.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// ExternalURL is the URL used in this environment, for an external backend.
+	// +optional
+	ExternalURL string `json:"externalURL,omitempty"`
 
 	// Weight is the effective weight applied to this backend.
 	// +optional

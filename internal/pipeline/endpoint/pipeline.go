@@ -8,7 +8,9 @@
 // import controller-runtime.
 //
 // The CEL context exposes ${metadata.*}, ${parameters.*}, ${environmentConfigs.*},
-// ${backends} (the resolved, weighted traffic backends), ${dataplane.*},
+// ${backends} (the resolved, weighted traffic backends), ${address} (the
+// Endpoint's own address), ${takeOver} (a component URL it also serves, when
+// set), ${dataplane.*},
 // ${environment.*}, and the effective ${gateway.*}.
 package endpointpipeline
 
@@ -217,6 +219,9 @@ func validateInput(input *RenderInput) error {
 	if len(input.Backends) == 0 {
 		return fmt.Errorf("input.Backends is empty")
 	}
+	if input.Address.Host == "" || input.Address.Path == "" {
+		return fmt.Errorf("input.Address is unset")
+	}
 	return nil
 }
 
@@ -248,6 +253,8 @@ func buildBaseContext(input *RenderInput) (map[string]any, error) {
 		Parameters:         parameters,
 		EnvironmentConfigs: envConfigs,
 		Backends:           input.Backends,
+		Address:            input.Address,
+		TakeOver:           input.TakeOver,
 		DataPlane:          input.DataPlane,
 		Environment:        input.Environment,
 		Gateway:            input.Environment.Gateway,

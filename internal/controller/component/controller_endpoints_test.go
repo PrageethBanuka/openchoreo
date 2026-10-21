@@ -72,8 +72,13 @@ func TestReconcileExposedEndpointsCreatesMissing(t *testing.T) {
 	ep := &openchoreov1alpha1.Endpoint{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: "payments-v1-http"}, ep))
 	assert.Equal(t, "shop", ep.Spec.Owner.ProjectName)
+	assert.Equal(t, openchoreov1alpha1.EndpointAddress{Path: "/payments-v1-http"}, ep.Spec.Address,
+		"the Endpoint's address is the URL path the component already serves")
+	require.NotNil(t, ep.Spec.TakeOver)
+	assert.Equal(t, openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, ep.Spec.TakeOver.Component,
+		"and it takes that URL over, so clients keep calling it (case 5)")
 	assert.Equal(t, []openchoreov1alpha1.EndpointBackendRef{
-		{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](100)},
+		{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](100)},
 	}, ep.Spec.BackendRefs)
 	assert.Equal(t, openchoreov1alpha1.EndpointReclaimPolicyDelete, ep.Spec.ReclaimPolicy)
 	assert.Equal(t, "workload/payments-v1/http", ep.Annotations[ocLabels.AnnotationKeyEndpointCreatedFrom])
@@ -92,11 +97,12 @@ func TestReconcileExposedEndpointsLeavesExistingAlone(t *testing.T) {
 	existing := &openchoreov1alpha1.Endpoint{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointSpec{
-			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
-			Type:  openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http-gateway"},
+			Owner:    openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
+			Type:     openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http-gateway"},
+			TakeOver: &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}},
 			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](90)},
-				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](10)},
+				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](90)},
+				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](10)},
 			},
 		},
 	}
@@ -120,7 +126,8 @@ func TestReconcileExposedEndpointsProblems(t *testing.T) {
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
 			Type:        openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http-gateway"},
-			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "orders", Endpoint: "http"}},
+			TakeOver:    &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "orders", Endpoint: "http"}},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "orders", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "orders", Endpoint: "http"}}},
 		},
 	}
 	mine := &openchoreov1alpha1.Endpoint{
@@ -128,7 +135,8 @@ func TestReconcileExposedEndpointsProblems(t *testing.T) {
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
 			Type:        openchoreov1alpha1.EndpointTypeRef{Name: "legacy"},
-			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "http"}},
+			TakeOver:    &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}},
 		},
 	}
 
@@ -164,8 +172,8 @@ func TestStillRoutedAndIndex(t *testing.T) {
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
 			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](0)},
-				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](100)},
+				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](0)},
+				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](100)},
 			},
 		},
 	}
@@ -173,8 +181,8 @@ func TestStillRoutedAndIndex(t *testing.T) {
 		return &openchoreov1alpha1.EndpointRelease{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS},
 			Spec: openchoreov1alpha1.EndpointReleaseSpec{BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To(v1)},
-				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To(100 - v1)},
+				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To(v1)},
+				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To(100 - v1)},
 			}},
 		}
 	}
@@ -219,14 +227,14 @@ func TestFinalizeHoldsWhileStillRouted(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
-			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "http"}},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}},
 		},
 	}
 	rel := &openchoreov1alpha1.EndpointRelease{
 		ObjectMeta: metav1.ObjectMeta{Name: "rel", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointReleaseSpec{BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-			{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](100)},
-			{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](0)},
+			{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](100)},
+			{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](0)},
 		}},
 	}
 	binding := &openchoreov1alpha1.EndpointReleaseBinding{
@@ -262,10 +270,11 @@ func TestPruneFromEndpoints(t *testing.T) {
 	shared := &openchoreov1alpha1.Endpoint{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointSpec{
-			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
+			Owner:    openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
+			TakeOver: &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}},
 			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{ComponentName: "payments-v1", Endpoint: "http", Weight: ptr.To[int32](0)},
-				{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](100)},
+				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](0)},
+				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](100)},
 			},
 		},
 	}
@@ -273,7 +282,7 @@ func TestPruneFromEndpoints(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "billing-api", Namespace: testNS},
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: "billing"},
-			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{ComponentName: "payments-v1", Endpoint: "http"}},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}},
 		},
 	}
 	r := newEndpointsReconciler(t, shared, otherProject)
@@ -282,9 +291,33 @@ func TestPruneFromEndpoints(t *testing.T) {
 	got := &openchoreov1alpha1.Endpoint{}
 	require.NoError(t, r.Get(context.Background(), client.ObjectKeyFromObject(shared), got))
 	assert.Equal(t, []openchoreov1alpha1.EndpointBackendRef{
-		{ComponentName: "payments-v2", Endpoint: "http", Weight: ptr.To[int32](100)},
+		{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](100)},
 	}, got.Spec.BackendRefs)
 
 	require.NoError(t, r.Get(context.Background(), client.ObjectKeyFromObject(otherProject), got))
 	assert.Len(t, got.Spec.BackendRefs, 1, "Endpoints of other projects are untouched")
+}
+
+func TestPruneFromEndpointsDropsTheTakeOver(t *testing.T) {
+	takesOver := &openchoreov1alpha1.Endpoint{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},
+		Spec: openchoreov1alpha1.EndpointSpec{
+			Owner:    openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
+			Address:  openchoreov1alpha1.EndpointAddress{Path: "/payments"},
+			TakeOver: &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}},
+			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
+				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](100)},
+			},
+			ReclaimPolicy: openchoreov1alpha1.EndpointReclaimPolicyDelete,
+		},
+	}
+	r := newEndpointsReconciler(t, takesOver)
+	require.NoError(t, r.pruneFromEndpoints(context.Background(), testComponent()))
+
+	got := &openchoreov1alpha1.Endpoint{}
+	require.NoError(t, r.Get(context.Background(), client.ObjectKeyFromObject(takesOver), got),
+		"the Endpoint owns its address, so it survives the component whose URL it took over (case 10)")
+	assert.Nil(t, got.Spec.TakeOver)
+	assert.Equal(t, "/payments", got.Spec.Address.Path)
+	assert.Len(t, got.Spec.BackendRefs, 1)
 }
