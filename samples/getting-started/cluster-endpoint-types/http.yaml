@@ -1,0 +1,226 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterEndpointType
+metadata:
+  name: http
+  annotations:
+    openchoreo.dev/description: >-
+      Serves an HTTP Endpoint on the environment's gateways and, when the data
+      plane runs a service mesh, to in-cluster callers too, with one split for
+      both. Emits a stable Service named after the Endpoint, which selects the
+      primary backend's pods, and one Service per backend. Renders a gateway
+      route for each external or internal visibility, with a NetworkPolicy
+      that lets those gateways reach the backends, and a mesh (GAMMA) route
+      on the stable Service when the DataPlane has the
+      openchoreo.dev/service-mesh annotation. The Endpoint's rules (header,
+      cookie and query matches, weights, mirrors) render on every route.
+      Requests are split once: by the gateway when it sits outside the mesh,
+      or by the mesh when the DataPlane is annotated
+      openchoreo.dev/gateway-in-mesh: "true".
+spec:
+  allowedHostnames:
+    - "*.openchoreoapis.localhost"
+  allowedBackendKinds:
+    - Component
+  parameters:
+    openAPIV3Schema:
+      type: object
+      additionalProperties: false
+      properties:
+        pathPrefix:
+          type: string
+          description: Path clients call on the gateway. Defaults to /<endpoint name>.
+          pattern: "^/[a-z0-9]([-a-z0-9/._]*[a-z0-9])?$"
+        hostname:
+          type: string
+          description: >-
+            Hostname to serve instead of the environment's gateway host; must
+            match allowedHostnames.
+  validations:
+    - rule: ${backends.all(b, b.protocol in ["HTTP", "GraphQL", "Websocket"])}
+      message: http only routes HTTP, GraphQL and Websocket endpoints
+    - rule: >-
+        ${visibility.all(v, v == "namespace" ||
+          (v == "external" && gateway.ingress.?external.hasValue()) ||
+          (v == "internal" && gateway.ingress.?internal.hasValue()))}
+      message: the environment has no gateway for one of the Endpoint's visibilities
+    - rule: >-
+        ${rules.all(r, size(r.mirrors) == 0) || !has(dataplane.annotations) ||
+          dataplane.annotations[?"openchoreo.dev/service-mesh"].orValue("") != "linkerd"}
+      message: Linkerd does not support request mirroring; remove the mirrors on this data plane
+  resources:
+    # The stable Service: the Endpoint's in-cluster address. It selects the
+    # primary backend (the highest weight in the catch-all rule), so callers
+    # outside a mesh reach a safe version; with a mesh it is the parent of the
+    # mesh route, which splits its traffic.
+    - id: stable-service
+      targetPlane: dataplane
+      forEach: >-
+        ${rules[size(rules) - 1].backends.filter(b,
+          rules[size(rules) - 1].backends.all(o, o.weight <= b.weight)).slice(0, 1)}
+      var: primary
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${metadata.endpointName}
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+        spec:
+          type: ClusterIP
+          selector: ${primary.podSelector}
+          ports:
+            - name: http
+              port: 80
+              targetPort: ${primary.targetPort}
+              appProtocol: http
+
+    # One Service per backend; every route weights these.
+    - id: backend-service
+      targetPlane: dataplane
+      forEach: ${backends}
+      var: backend
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${backend.serviceName}
+          namespace: ${metadata.namespace}
+          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-backend": backend.name})}'
+        spec:
+          type: ClusterIP
+          selector: ${backend.podSelector}
+          ports:
+            - name: http
+              port: ${backend.port}
+              targetPort: ${backend.targetPort}
+              appProtocol: http
+
+    # Lets the gateways of the Endpoint's visibilities reach each backend's
+    # pods. A component's own NetworkPolicy admits only its namespace and the
+    # gateways of the visibilities it declares itself, which an Endpoint's
+    # backends need not declare. NetworkPolicies add up, so this only widens.
+    - id: gateway-ingress
+      targetPlane: dataplane
+      includeWhen: ${visibility.exists(v, v in ["external", "internal"])}
+      forEach: ${backends}
+      var: backend
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: ${backend.serviceName}
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+        spec:
+          podSelector:
+            matchLabels: ${backend.podSelector}
+          policyTypes: [Ingress]
+          ingress:
+            - from: |
+                ${visibility.filter(v, v in ["external", "internal"]).map(v, {"namespaceSelector": {"matchLabels": {
+                  "kubernetes.io/metadata.name": v == "external" ? gateway.ingress.external.namespace : gateway.ingress.internal.namespace}}})}
+              ports:
+                - port: ${backend.targetPort}
+                  protocol: TCP
+
+    # A gateway route per external or internal visibility. Namespace
+    # visibility has no gateway: callers in the namespace use the stable
+    # Service.
+    - id: gateway-route
+      targetPlane: dataplane
+      forEach: ${visibility.filter(v, v in ["external", "internal"])}
+      var: vis
+      template:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: ${metadata.name}-${vis}
+          namespace: ${metadata.namespace}
+          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-visibility": vis})}'
+          annotations:
+            openchoreo.dev/endpoint-base-path: ${parameters.?pathPrefix.orValue("/" + metadata.endpointName)}
+        spec:
+          parentRefs:
+            - name: '${vis == "external" ? gateway.ingress.external.name : gateway.ingress.internal.name}'
+              namespace: '${vis == "external" ? gateway.ingress.external.namespace : gateway.ingress.internal.namespace}'
+          hostnames: |
+            ${parameters.?hostname.hasValue() ? [parameters.hostname] :
+              (vis == "external"
+                ? [gateway.ingress.external.?http, gateway.ingress.external.?https]
+                : [gateway.ingress.internal.?http, gateway.ingress.internal.?https])
+              .filter(g, g.hasValue()).map(g, g.value().host).distinct()
+              .map(h, metadata.environmentName + "-" + metadata.endpointNamespace + "." + h)}
+          # With the gateway in the mesh, the gateway forwards to the stable
+          # Service and the mesh route splits, so each request is split once.
+          # Otherwise the gateway splits by the Endpoint's rules itself; the
+          # Cookie header is matched with a regex, and each rule rewrites the
+          # path prefix to its backends' base path.
+          rules: |
+            ${has(dataplane.annotations) &&
+              dataplane.annotations[?"openchoreo.dev/service-mesh"].hasValue() &&
+              dataplane.annotations[?"openchoreo.dev/gateway-in-mesh"].orValue("false") == "true"
+              ? [{
+                  "matches": [{"path": {"type": "PathPrefix", "value": parameters.?pathPrefix.orValue("/" + metadata.endpointName)}}],
+                  "filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch",
+                    "replacePrefixMatch": rules[size(rules) - 1].backends[0].basePath}}}],
+                  "backendRefs": [{"name": metadata.endpointName, "port": 80}]
+                }]
+              : rules.map(r, {
+                  "matches": (size(r.matches) > 0 ? r.matches : [{"headers": [], "cookies": [], "queryParams": []}]).map(m, {
+                    "path": {"type": "PathPrefix", "value": parameters.?pathPrefix.orValue("/" + metadata.endpointName)},
+                    "headers": size(m.headers) + size(m.cookies) > 0
+                      ? m.headers.map(h, {"type": h.type, "name": h.name, "value": h.value}) +
+                        m.cookies.map(c, {"type": "RegularExpression", "name": "cookie",
+                          "value": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"})
+                      : oc_omit(),
+                    "queryParams": size(m.queryParams) > 0
+                      ? m.queryParams.map(q, {"type": "Exact", "name": q.name, "value": q.value})
+                      : oc_omit()
+                  }),
+                  "filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch",
+                      "replacePrefixMatch": r.backends[0].basePath}}}] +
+                    r.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
+                      "backendRef": {"name": mi.backend.serviceName, "port": mi.backend.port}, "percent": mi.percent}}),
+                  "backendRefs": r.backends.filter(b, b.weight > 0)
+                    .map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
+                })}
+
+    # The mesh route: in-cluster callers of the stable Service get the same
+    # rules and split as gateway traffic.
+    - id: mesh-route
+      targetPlane: dataplane
+      includeWhen: ${has(dataplane.annotations) && dataplane.annotations[?"openchoreo.dev/service-mesh"].hasValue()}
+      template:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: ${metadata.name}-mesh
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+        spec:
+          parentRefs:
+            - group: ""
+              kind: Service
+              name: ${metadata.endpointName}
+              port: 80
+          rules: |
+            ${rules.map(r, {
+                "matches": size(r.matches) > 0
+                  ? r.matches.map(m, {
+                      "headers": size(m.headers) + size(m.cookies) > 0
+                        ? m.headers.map(h, {"type": h.type, "name": h.name, "value": h.value}) +
+                          m.cookies.map(c, {"type": "RegularExpression", "name": "cookie",
+                            "value": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"})
+                        : oc_omit(),
+                      "queryParams": size(m.queryParams) > 0
+                        ? m.queryParams.map(q, {"type": "Exact", "name": q.name, "value": q.value})
+                        : oc_omit()
+                    })
+                  : oc_omit(),
+                "filters": size(r.mirrors) > 0
+                  ? r.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
+                      "backendRef": {"name": mi.backend.serviceName, "port": mi.backend.port}, "percent": mi.percent}})
+                  : oc_omit(),
+                "backendRefs": r.backends.filter(b, b.weight > 0)
+                  .map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
+              })}

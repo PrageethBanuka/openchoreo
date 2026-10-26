@@ -4,104 +4,73 @@ metadata:
   name: istio-virtualservice
   annotations:
     openchoreo.dev/description: >-
-      Routes in-cluster (east-west) calls to a component's Service through an
-      Istio sidecar mesh, using a VirtualService on that Service's host.
-      Callers keep the URL they already use; Istio splits it across the
-      Endpoint's backends by weight, after any header, cookie or query rules,
-      and can mirror a share to another backend. Needs a DataPlane annotated
-      openchoreo.dev/service-mesh=istio and sidecars on the callers. In ambient
-      mode, use mesh-gamma instead: VirtualService on waypoints is Alpha.
+      Serves an Endpoint to in-cluster (east-west) callers through an Istio
+      sidecar mesh. Emits a stable Service named after the Endpoint and one
+      Service per backend, and a VirtualService on the stable Service's host
+      that applies the Endpoint's rules, split and mirrors. Needs a DataPlane
+      annotated openchoreo.dev/service-mesh=istio and sidecars on the callers.
+      In ambient mode, use mesh-gamma instead: VirtualService on waypoints is
+      Alpha.
 spec:
-  addressKind: Service
   allowedBackendKinds:
     - Component
-  # The shared traffic schema (samples/mesh-endpoint-types/traffic-schema.yaml).
-  parameters:
-    openAPIV3Schema:
-      type: object
-      properties:
-        rules:
-          type: array
-          default: []
-          maxItems: 15
-          items:
-            type: object
-            required: [name, matches, backendRefs]
-            properties:
-              name:
-                type: string
-                pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
-              matches:
-                type: array
-                minItems: 1
-                items:
-                  type: object
-                  properties:
-                    headers:
-                      type: array
-                      items:
-                        type: object
-                        required: [name, value]
-                        properties:
-                          name: { type: string }
-                          value: { type: string }
-                          type: { type: string, enum: [Exact, RegularExpression], default: Exact }
-                    cookies:
-                      type: array
-                      maxItems: 1
-                      items:
-                        type: object
-                        required: [name, value]
-                        properties:
-                          name: { type: string, pattern: "^[A-Za-z0-9_-]+$" }
-                          value: { type: string, pattern: "^[A-Za-z0-9_.-]+$" }
-                    queryParams:
-                      type: array
-                      items:
-                        type: object
-                        required: [name, value]
-                        properties:
-                          name: { type: string }
-                          value: { type: string }
-                    method:
-                      type: string
-                      enum: [GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH]
-              backendRefs:
-                type: array
-                minItems: 1
-                maxItems: 16
-                items:
-                  type: object
-                  required: [name]
-                  properties:
-                    name: { type: string }
-                    weight: { type: integer, minimum: 0, default: 1 }
-        mirrors:
-          type: array
-          default: []
-          items:
-            type: object
-            required: [backendRef, percent]
-            properties:
-              backendRef: { type: string }
-              percent: { type: integer, minimum: 0, maximum: 100 }
   validations:
     - rule: >-
-        ${has(dataplane.annotations) && "openchoreo.dev/service-mesh" in dataplane.annotations &&
-          dataplane.annotations["openchoreo.dev/service-mesh"] == "istio"}
+        ${has(dataplane.annotations) && dataplane.annotations[?"openchoreo.dev/service-mesh"].orValue("") == "istio"}
       message: >-
         istio-virtualservice needs Istio on the data plane: annotate the
         DataPlane with openchoreo.dev/service-mesh=istio
-    - rule: ${takeOver != null}
-      message: istio-virtualservice routes the taken-over component's Service; set spec.takeOver
+    - rule: ${visibility == ["namespace"]}
+      message: >-
+        istio-virtualservice serves in-cluster callers only; set spec.visibility to
+        [namespace], or use the http type to serve a gateway as well
     - rule: ${backends.all(b, b.protocol in ["HTTP", "GraphQL", "Websocket"])}
       message: istio-virtualservice only routes HTTP, GraphQL and Websocket endpoints
-    - rule: >-
-        ${parameters.rules.all(r, r.backendRefs.all(rb, backends.exists(b, b.name == rb.name)))}
-      message: a rule targets a backend that is not in spec.backendRefs or not deployed in this environment
-    - rule: ${parameters.mirrors.all(m, backends.exists(b, b.name == m.backendRef))}
-      message: a mirror targets a backend that is not in spec.backendRefs or not deployed in this environment
   resources:
+    # The stable Service: the Endpoint's in-cluster address, selecting the
+    # primary backend (the highest weight in the catch-all rule). The mesh
+    # routes its traffic.
+    - id: stable-service
+      targetPlane: dataplane
+      forEach: >-
+        ${rules[size(rules) - 1].backends.filter(b,
+          rules[size(rules) - 1].backends.all(o, o.weight <= b.weight)).slice(0, 1)}
+      var: primary
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${metadata.endpointName}
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+        spec:
+          type: ClusterIP
+          selector: ${primary.podSelector}
+          ports:
+            - name: http
+              port: 80
+              targetPort: ${primary.targetPort}
+              appProtocol: http
+    # One Service per backend, which the mesh resource weights.
+    - id: backend-service
+      targetPlane: dataplane
+      forEach: ${backends}
+      var: backend
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${backend.serviceName}
+          namespace: ${metadata.namespace}
+          labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-backend": backend.name})}'
+        spec:
+          type: ClusterIP
+          selector: ${backend.podSelector}
+          ports:
+            - name: http
+              port: ${backend.port}
+              targetPort: ${backend.targetPort}
+              appProtocol: http
     - id: virtual-service
       targetPlane: dataplane
       template:
@@ -113,40 +82,35 @@ spec:
           labels: ${metadata.labels}
         spec:
           hosts:
-            - ${takeOver.serviceName + "." + takeOver.namespace + ".svc.cluster.local"}
-          # One route per parameters.rules entry, in order (first match wins),
-          # then the default split. Cookies match as a regex on the Cookie
-          # header; Istio matches headers and query parameters by name.
+            - ${metadata.endpointName + "." + metadata.namespace + ".svc.cluster.local"}
+          # One route per Endpoint rule, in order (first match wins). Cookies
+          # match as a regex on the Cookie header; Istio matches headers and
+          # query parameters by name.
           http: |
-            ${parameters.rules.map(r, {
+            ${rules.map(r, {
                 "name": r.name,
-                "match": r.matches.map(m, {
-                  "headers": size(m.?headers.orValue([]) + m.?cookies.orValue([])) > 0
-                    ? oc_merge(
-                        m.?headers.orValue([]).transformMapEntry(i, h,
-                          {h.name: h.type == "Exact" ? {"exact": h.value} : {"regex": h.value}}),
-                        m.?cookies.orValue([]).transformMapEntry(i, c,
-                          {"cookie": {"regex": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"}}))
-                    : oc_omit(),
-                  "queryParams": size(m.?queryParams.orValue([])) > 0
-                    ? m.queryParams.transformMapEntry(i, q, {q.name: {"exact": q.value}})
-                    : oc_omit(),
-                  "method": has(m.method) ? {"exact": m.method} : oc_omit()
-                }),
-                "route": r.backendRefs.map(rb, backends.filter(b, b.name == rb.name).map(b, {
-                  "destination": {"host": b.serviceName + "." + b.namespace + ".svc.cluster.local",
-                                  "port": {"number": b.port}},
-                  "weight": rb.weight})[0])
-              }) + [{
-                "name": "default",
-                "route": backends.filter(b, b.weight > 0).map(b, {
+                "match": size(r.matches) > 0
+                  ? r.matches.map(m, {
+                      "headers": size(m.headers) + size(m.cookies) > 0
+                        ? oc_merge(
+                            m.headers.transformMapEntry(i, h,
+                              {h.name: h.type == "Exact" ? {"exact": h.value} : {"regex": h.value}}),
+                            m.cookies.transformMapEntry(i, c,
+                              {"cookie": {"regex": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"}}))
+                        : oc_omit(),
+                      "queryParams": size(m.queryParams) > 0
+                        ? m.queryParams.transformMapEntry(i, q, {q.name: {"exact": q.value}})
+                        : oc_omit()
+                    })
+                  : oc_omit(),
+                "route": r.backends.filter(b, b.weight > 0).map(b, {
                   "destination": {"host": b.serviceName + "." + b.namespace + ".svc.cluster.local",
                                   "port": {"number": b.port}},
                   "weight": b.weight}),
-                "mirrors": size(parameters.mirrors) > 0
-                  ? parameters.mirrors.map(mi, backends.filter(b, b.name == mi.backendRef).map(b, {
-                      "destination": {"host": b.serviceName + "." + b.namespace + ".svc.cluster.local",
-                                      "port": {"number": b.port}},
-                      "percentage": {"value": double(mi.percent)}})[0])
+                "mirrors": size(r.mirrors) > 0
+                  ? r.mirrors.map(mi, {
+                      "destination": {"host": mi.backend.serviceName + "." + mi.backend.namespace + ".svc.cluster.local",
+                                      "port": {"number": mi.backend.port}},
+                      "percentage": {"value": double(mi.percent)}})
                   : oc_omit()
-              }]}
+              })}

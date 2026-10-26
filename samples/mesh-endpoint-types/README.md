@@ -1,11 +1,13 @@
 # Mesh EndpointTypes
 
-These ClusterEndpointTypes route **east-west** (in-cluster) traffic through a
-service mesh. Each one takes over a component's own Service: callers keep the
-URL they already get from their connections
-(`<component>.<data-plane namespace>.svc.cluster.local`), and the mesh splits
-it across the Endpoint's backends. They are opt-in samples, not part of the
-getting-started set, and are meant to ship with each mesh module.
+These ClusterEndpointTypes serve an Endpoint to **east-west** (in-cluster)
+callers only, through one service mesh each. Like the getting-started
+[`http`](../getting-started/cluster-endpoint-types/http.yaml) type, each one
+emits a stable Service named after the Endpoint (selecting the primary
+backend's pods) and one Service per backend. It then renders its mesh's own
+routing resource on the stable Service, so callers of
+`<endpoint>.<data-plane namespace>.svc.cluster.local` get the Endpoint's rules
+and split. They are opt-in samples, meant to ship with each mesh module.
 
 | Type | Renders | Mesh |
 | --- | --- | --- |
@@ -13,26 +15,28 @@ getting-started set, and are meant to ship with each mesh module.
 | [`istio-virtualservice`](istio-virtualservice.yaml) | Istio `VirtualService` | Istio with sidecars |
 | [`cilium-cec`](cilium-cec.yaml) | `CiliumEnvoyConfig` | Cilium with `kubeProxyReplacement=true` and `envoyConfig.enabled=true` |
 
-All three are `addressKind: Service`, so their Endpoints set `takeOver` and no
-`address`.
+Their Endpoints set `visibility: [namespace]`. To serve a gateway too, with the
+same split, use the `http` type: it composes the GAMMA route whenever the
+DataPlane has a mesh.
 
-## Traffic parameters
+## Rules
 
-Every type accepts the same [traffic schema](traffic-schema.yaml) in
-`spec.parameters`:
+Every type renders the Endpoint's `spec.rules` from `${rules}`. The binding
+controller resolves them for the environment, and always ends the list with a
+catch-all:
 
-- **`rules`**: ordered rules, evaluated before the default split. The first
-  matching rule wins. A rule matches on headers, a cookie, query parameters or
-  the method, and sends the request to one or more backends by name.
-- **`mirrors`**: copies a share of the default split's requests to a backend,
-  usually a weight-0 one, and discards its responses.
+- Rules are evaluated in order, and the first one that matches wins. A rule
+  matches on headers, a cookie (rendered as a regex on the Cookie header) or
+  query parameters. It sends the request to one or more backends by weight, and
+  can mirror a share of it to a backend, usually a weight-0 one.
+- Without a catch-all rule, unmatched requests follow `spec.backendRefs` by
+  weight.
+- A binding can change a backend's weight for its environment with
+  `spec.backendOverrides[].weight`, without cutting a new release. It applies
+  to backendRefs and to rules that split between several backends.
 
-The default split is `spec.backendRefs` by weight. A binding can change a
-backend's weight for its environment with `spec.backendOverrides[].weight`,
-without cutting a new release.
-
-A type leaves out what its mesh can't render. Linkerd has no request mirroring,
-so `mesh-gamma` refuses `mirrors` on a Linkerd data plane.
+A type refuses what its mesh can't render. Linkerd has no request mirroring,
+so `mesh-gamma` refuses mirrors on a Linkerd data plane.
 
 ## Setting up a data plane
 
@@ -74,16 +78,15 @@ so `mesh-gamma` refuses `mirrors` on a Linkerd data plane.
 ## Example
 
 `orders` (v1) and `orders-v2` are two Components in project `shop`, each with an
-HTTP workload endpoint named `http`. Callers already use the `orders` Service
-URL. This Endpoint keeps that URL and sends 10% of its traffic to v2. Testers
-who send `x-canary: true` always reach v2, and 5% of requests are mirrored to
-v2:
+HTTP workload endpoint named `http`. In-cluster callers use the Endpoint's
+Service `orders-api`. 10% of its traffic goes to v2. Testers who send
+`x-canary: true` always reach v2, and 5% of requests are mirrored to v2:
 
 ```yaml
 apiVersion: openchoreo.dev/v1alpha1
 kind: Endpoint
 metadata:
-  name: orders
+  name: orders-api
   namespace: default
 spec:
   owner:
@@ -91,39 +94,42 @@ spec:
   type:
     kind: ClusterEndpointType
     name: mesh-gamma
-  takeOver:
-    component: { name: orders, endpoint: http }
+  visibility: [namespace]
+  autoDeploy: true
   backendRefs:
     - { name: stable, component: { name: orders, endpoint: http }, weight: 90 }
     - { name: canary, component: { name: orders-v2, endpoint: http }, weight: 10 }
-  parameters:
-    rules:
-      - name: testers
-        matches:
-          - headers: [{ name: x-canary, value: "true" }]
-        backendRefs: [{ name: canary }]
-    mirrors:
-      - { backendRef: canary, percent: 5 }
+  rules:
+    - name: testers
+      matches:
+        - headers: [{ name: x-canary, value: "true" }]
+      backends: [{ name: canary }]
+    - name: default
+      backends: [{ name: stable, weight: 90 }, { name: canary, weight: 10 }]
+      mirrors: [{ backend: canary, percent: 5 }]
 ---
 apiVersion: openchoreo.dev/v1alpha1
 kind: EndpointReleaseBinding
 metadata:
-  name: orders-development
+  name: orders-api-development
   namespace: default
 spec:
-  owner: { projectName: shop, endpointName: orders }
+  owner: { projectName: shop, endpointName: orders-api }
   environment: development
   endpointRelease: <the Endpoint's status.latestRelease.name>
   backendOverrides:
     - { name: canary, weight: 50 }   # development runs 50/50; the release says 90/10
 ```
 
+With `autoDeploy`, the Endpoint controller creates the binding for the
+pipeline's first environment; add `backendOverrides` to it.
+
 To check the split, call the Service 100 times from a meshed pod and count the
 answers:
 
 ```shell
 kubectl exec -n <data-plane namespace> <client pod> -- sh -c \
-  'for i in $(seq 1 100); do curl -s http://orders:8080/; echo; done' | sort | uniq -c
+  'for i in $(seq 1 100); do curl -s http://orders-api/; echo; done' | sort | uniq -c
 ```
 
 Then send `-H 'x-canary: true'` and every answer should come from v2. Change
