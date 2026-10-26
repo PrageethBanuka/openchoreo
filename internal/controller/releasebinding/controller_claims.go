@@ -35,8 +35,8 @@ type endpointClaim struct {
 }
 
 // claimedEndpoints returns, per workload endpoint name, the Endpoint claims
-// on this component in the binding's environment: the Endpoints serving one
-// of its URLs. A claim is the
+// on this component in the binding's environment: the Endpoints routing to
+// it. A claim is the
 // status.serving record of an EndpointReleaseBinding: present once the
 // Endpoint's route has been accepted, absent or marked releasing while the
 // binding hands traffic back. Endpoints and their bindings are read from the
@@ -59,8 +59,10 @@ func (r *Reconciler) claimedEndpoints(
 		if ep.Spec.Owner.ProjectName != project {
 			continue
 		}
-		if t := controller.TakenOver(ep); t != nil && t.Name == component {
-			routing[ep.Name] = true
+		for _, name := range controller.EndpointComponentNames(ep) {
+			if name == component {
+				routing[ep.Name] = true
+			}
 		}
 	}
 	if len(routing) == 0 {
@@ -136,9 +138,7 @@ func isClaimedRoute(res map[string]any, claims map[string][]endpointClaim) bool 
 }
 
 // applyClaimsToStatus records, on each workload endpoint's status, the
-// Endpoints that own its routing. Its URLs are left as the component's own
-// addresses: an Endpoint that takes over an endpoint serves those same
-// addresses, so clients and connections keep working unchanged.
+// Endpoints that own its routing in which visibilities.
 func applyClaimsToStatus(
 	statuses []openchoreov1alpha1.EndpointURLStatus,
 	claims map[string][]endpointClaim,

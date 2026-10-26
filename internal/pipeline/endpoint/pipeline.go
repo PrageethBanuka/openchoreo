@@ -8,9 +8,9 @@
 // import controller-runtime.
 //
 // The CEL context exposes ${metadata.*}, ${parameters.*}, ${environmentConfigs.*},
-// ${backends} (the resolved, weighted traffic backends), ${address} (the
-// Endpoint's own address), ${takeOver} (a component URL it also serves, when
-// set), ${dataplane.*},
+// ${visibility} (the Endpoint's declared visibilities), ${backends} (the
+// resolved, weighted traffic backends, with what their Services need),
+// ${rules} (the Endpoint's rules, ending with a catch-all), ${dataplane.*},
 // ${environment.*}, and the effective ${gateway.*}.
 package endpointpipeline
 
@@ -219,10 +219,8 @@ func validateInput(input *RenderInput) error {
 	if len(input.Backends) == 0 {
 		return fmt.Errorf("input.Backends is empty")
 	}
-	// Service-addressed types serve the taken-over component's in-cluster
-	// Service and have no address of their own.
-	if !input.EndpointTypeSpec.ServesService() && (input.Address.Host == "" || input.Address.Path == "") {
-		return fmt.Errorf("input.Address is unset")
+	if len(input.Rules) == 0 {
+		return fmt.Errorf("input.Rules is empty")
 	}
 	return nil
 }
@@ -254,9 +252,9 @@ func buildBaseContext(input *RenderInput) (map[string]any, error) {
 		Metadata:           md,
 		Parameters:         parameters,
 		EnvironmentConfigs: envConfigs,
+		Visibility:         nonNil(input.Visibility),
 		Backends:           input.Backends,
-		Address:            input.Address,
-		TakeOver:           input.TakeOver,
+		Rules:              input.Rules,
 		DataPlane:          input.DataPlane,
 		Environment:        input.Environment,
 		Gateway:            input.Environment.Gateway,
@@ -293,6 +291,14 @@ func extractAndDefault(raw *runtime.RawExtension, section *v1alpha1.SchemaSectio
 		return nil, err
 	}
 	return target, nil
+}
+
+// nonNil returns s, or an empty slice when s is nil, so CEL sees a list.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // structToMap converts typed Go structs to map[string]any for CEL evaluation

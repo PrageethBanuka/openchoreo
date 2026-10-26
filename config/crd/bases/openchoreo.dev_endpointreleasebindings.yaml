@@ -70,26 +70,13 @@ spec:
               backendOverrides:
                 description: |-
                   BackendOverrides sets environment-specific values for the release's
-                  backends, matched by name: an external backend's URL, so staging can call
-                  a staging service, and a backend's weight, so each environment can run its
-                  own traffic split while the release stays the same.
+                  backends, matched by name. Today it sets a backend's weight, so each
+                  environment can run its own traffic split (a canary step, a blue/green
+                  switch) while the release stays the same.
                 items:
                   description: EndpointBackendOverride sets an environment-specific
                     value for one backend.
                   properties:
-                    external:
-                      description: External overrides an external backend's URL in
-                        this environment.
-                      properties:
-                        url:
-                          description: URL is the service's base URL, for example
-                            https://legacy.example.com.
-                          maxLength: 2048
-                          pattern: ^https?://[a-zA-Z0-9]([-a-zA-Z0-9.]*[a-zA-Z0-9])?(:[0-9]{1,5})?(/.*)?$
-                          type: string
-                      required:
-                      - url
-                      type: object
                     name:
                       description: Name is the backend's name in the release.
                       minLength: 1
@@ -97,9 +84,10 @@ spec:
                     weight:
                       description: |-
                         Weight replaces the release's weight for this backend in this
-                        environment, with the same semantics: relative to the other backends'
-                        weights, and 0 sends no traffic. It changes the split without cutting a
-                        new release; status.backends reports the effective weight.
+                        environment, in spec.backendRefs and in every rule that names it, with
+                        the same semantics: relative to the other backends' weights, and 0 sends
+                        no traffic. It changes the split without cutting a new release;
+                        status.backends reports the effective weight.
                       format: int32
                       maximum: 1000000
                       minimum: 0
@@ -132,14 +120,6 @@ spec:
                 x-kubernetes-validations:
                 - message: spec.environment is immutable
                   rule: self == oldSelf
-              hostname:
-                description: |-
-                  Hostname overrides the Endpoint's address.hostname in this environment,
-                  for example payments.staging.example.com. It must match the
-                  EndpointType's allowedHostnames.
-                maxLength: 253
-                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$
-                type: string
               owner:
                 description: Owner identifies the endpoint and project this EndpointReleaseBinding
                   belongs to.
@@ -168,35 +148,6 @@ spec:
             description: EndpointReleaseBindingStatus defines the observed state of
               EndpointReleaseBinding.
             properties:
-              addresses:
-                description: |-
-                  Addresses are the host and path pairs this binding serves in its
-                  environment, recorded once resolved. Bindings compare them to keep one
-                  route per address.
-                items:
-                  description: EndpointResolvedAddress is an address a binding serves
-                    in its environment.
-                  properties:
-                    host:
-                      description: Host is the hostname clients call.
-                      type: string
-                    kind:
-                      description: |-
-                        Kind is Address for the Endpoint's own address and TakeOver for a
-                        taken-over component URL.
-                      enum:
-                      - Address
-                      - TakeOver
-                      type: string
-                    path:
-                      description: Path is the path prefix clients call.
-                      type: string
-                  required:
-                  - host
-                  - kind
-                  - path
-                  type: object
-                type: array
               backends:
                 description: |-
                   Backends holds the resolution result of each backendRef for this binding's
@@ -215,10 +166,6 @@ spec:
                       description: Endpoint is the name of the workload endpoint,
                         for a component backend.
                       type: string
-                    externalURL:
-                      description: ExternalURL is the URL used in this environment,
-                        for an external backend.
-                      type: string
                     name:
                       description: Name is the backend's name in the release.
                       minLength: 1
@@ -231,8 +178,9 @@ spec:
                         deployed in this environment.
                       type: boolean
                     serviceURL:
-                      description: ServiceURL is the in-cluster service URL of the
-                        backend in this environment.
+                      description: |-
+                        ServiceURL is the URL of the Service the Endpoint renders for this backend
+                        in this environment.
                       properties:
                         host:
                           description: Host is the hostname or IP address.
@@ -511,9 +459,9 @@ spec:
                     type: string
                   urls:
                     description: |-
-                      URLs are the component workload endpoints whose URLs the accepted routes
-                      serve: the Endpoint's spec.url. Those components stop rendering their own
-                      routes for them; other backends keep their own URLs.
+                      URLs are the component workload endpoints the accepted routes serve: the
+                      Endpoint's component backends. Those components stop rendering their own
+                      gateway routes for them in the claimed visibilities.
                     items:
                       description: EndpointBackendSlot identifies a component workload
                         endpoint.
@@ -538,9 +486,8 @@ spec:
                     x-kubernetes-list-type: map
                   visibilities:
                     description: |-
-                      Visibilities are the gateway visibilities the accepted routes serve, from
-                      their openchoreo.dev/endpoint-visibility label (external by default).
-                      Component routes of other visibilities are left in place.
+                      Visibilities are the Endpoint's declared spec.visibility. Component routes
+                      of other visibilities are left in place.
                     items:
                       description: |-
                         EndpointVisibility defines the visibility scope for an endpoint.

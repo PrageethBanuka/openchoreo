@@ -89,27 +89,7 @@ var _ = Describe("Finalizer", func() {
 		return res
 	}
 
-	It("keeps an Endpoint with no backends as Orphaned and deletes its bindings when reclaimPolicy is Retain", func() {
-		ep := newEndpoint("orphan-retain", true)
-		ep.Spec.BackendRefs = nil
-		ep.Spec.ReclaimPolicy = openchoreov1alpha1.EndpointReclaimPolicyRetain
-		binding := newBinding("orphan-retain-dev", ep.Name, "p", false)
-		cli := buildClient(ep, binding)
-		r := &Reconciler{Client: cli, Scheme: scheme.Scheme}
-
-		reconcileOnce(r, ep)
-
-		updated := &openchoreov1alpha1.Endpoint{}
-		Expect(cli.Get(finCtx, client.ObjectKeyFromObject(ep), updated)).To(Succeed())
-		Expect(updated.DeletionTimestamp).To(BeNil())
-		orphaned := meta.FindStatusCondition(updated.Status.Conditions, string(ConditionOrphaned))
-		Expect(orphaned).NotTo(BeNil())
-		Expect(orphaned.Status).To(Equal(metav1.ConditionTrue))
-		err := cli.Get(finCtx, client.ObjectKeyFromObject(binding), &openchoreov1alpha1.EndpointReleaseBinding{})
-		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the binding should be deleted")
-	})
-
-	It("deletes an Endpoint with no backends when reclaimPolicy is Delete", func() {
+	It("deletes an Endpoint with no backends", func() {
 		ep := newEndpoint("orphan-delete", true)
 		ep.Spec.BackendRefs = nil
 		cli := buildClient(ep)

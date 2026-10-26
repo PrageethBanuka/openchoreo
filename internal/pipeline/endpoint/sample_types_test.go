@@ -5,7 +5,6 @@ package endpointpipeline
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,13 +17,20 @@ import (
 	"github.com/openchoreo/openchoreo/api/v1alpha1"
 )
 
-// meshSamplesDir holds the mesh EndpointType samples rendered by these tests.
-var meshSamplesDir = filepath.Join("..", "..", "..", "samples", "mesh-endpoint-types")
+var (
+	// meshSamplesDir holds the mesh EndpointType samples rendered by these tests.
+	meshSamplesDir = filepath.Join("..", "..", "..", "samples", "mesh-endpoint-types")
+
+	// httpSample is the getting-started http EndpointType.
+	httpSample = filepath.Join("..", "..", "..", "samples", "getting-started", "cluster-endpoint-types", "http.yaml")
+)
+
+const sampleNS = "dp-default-shop-dev-a1b2c3d"
 
 // loadClusterEndpointType reads a ClusterEndpointType sample.
-func loadClusterEndpointType(t *testing.T, file string) *v1alpha1.EndpointTypeSpec {
+func loadClusterEndpointType(t *testing.T, path string) *v1alpha1.EndpointTypeSpec {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(meshSamplesDir, file))
+	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var cet v1alpha1.ClusterEndpointType
 	require.NoError(t, yaml.UnmarshalStrict(data, &cet))
@@ -32,219 +38,283 @@ func loadClusterEndpointType(t *testing.T, file string) *v1alpha1.EndpointTypeSp
 	return &spec
 }
 
-// meshBackends are a stable and a canary backend, plus a weight-0 shadow.
-func meshBackends() []Backend {
-	ns := "dp-default-shop-dev-a1b2c3d"
-	backend := func(name, svc string, weight int32) Backend {
+// sampleBackends are the trips rewrite at 90/10, plus a weight-0 shadow.
+func sampleBackends() []Backend {
+	backend := func(name string, weight int32) Backend {
+		svc := "e-trips-api-dev-" + name
 		return Backend{
-			Name: name, Kind: "Component", ComponentName: svc, Endpoint: "http", Protocol: "HTTP",
-			ServiceName: svc, Namespace: ns, Port: 8080, Weight: weight,
-			ServiceURL: "http://" + svc + "." + ns + ".svc.cluster.local:8080",
+			Name: name, Kind: "Component", ComponentName: name, Endpoint: "http", Protocol: "HTTP",
+			PodSelector: map[string]string{"openchoreo.dev/component-uid": name + "-uid", "openchoreo.dev/environment-uid": "dev-uid"},
+			TargetPort:  8080, ServiceName: svc, Namespace: sampleNS, Port: 80, Weight: weight, BasePath: "/",
+			ServiceURL: "http://" + svc + "." + sampleNS + ".svc.cluster.local:80",
 		}
 	}
-	return []Backend{backend("stable", "orders", 90), backend("canary", "orders-v2", 10), backend("shadow", "orders-v3", 0)}
+	return []Backend{backend("trips-python", 90), backend("trips-go", 10), backend("trips-shadow", 0)}
 }
 
-// meshTakeOver is the orders Service, whose callers the mesh route serves.
-func meshTakeOver() *URLContext {
-	return &URLContext{
-		ComponentName: "orders", Endpoint: "http", BasePath: "/",
-		ServiceName: "orders", Namespace: "dp-default-shop-dev-a1b2c3d", Port: 8080,
-		ServiceURL: "http://orders.dp-default-shop-dev-a1b2c3d.svc.cluster.local:8080",
+// sampleRules are a header rule, a cookie rule, and a catch-all that splits
+// 90/10 and mirrors 10% to the shadow, resolved as the binding controller
+// does.
+func sampleRules() []Rule {
+	b := sampleBackends()
+	none := Match{Headers: []HeaderMatch{}, Cookies: []CookieMatch{}, QueryParams: []QueryParamMatch{}}
+	header, cookie := none, none
+	header.Headers = []HeaderMatch{{Name: "x-canary", Type: "Exact", Value: "true"}}
+	cookie.Cookies = []CookieMatch{{Name: "ab", Value: "b"}}
+	single := b[1]
+	single.Weight = 1
+	return []Rule{
+		{Name: "testers", Matches: []Match{header}, Backends: []Backend{single}, Mirrors: []Mirror{}},
+		{Name: "arm-b", Matches: []Match{cookie}, Backends: []Backend{single}, Mirrors: []Mirror{}},
+		{Name: "default", Matches: []Match{}, Backends: b, Mirrors: []Mirror{{Backend: b[2], Percent: 10}}},
 	}
 }
 
-func meshDataPlane(mesh string) DataPlaneContext {
-	return BuildDataPlaneContext(&v1alpha1.DataPlane{
-		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"openchoreo.dev/service-mesh": mesh}},
-	})
+func sampleMetadata() MetadataContext {
+	return MetadataContext{
+		Name:              "e-trips-api-dev",
+		Namespace:         sampleNS,
+		EndpointNamespace: "default",
+		EndpointName:      "trips-api",
+		ProjectName:       "rides",
+		EnvironmentName:   "development",
+		Labels:            map[string]string{"openchoreo.dev/project": "rides"},
+	}
 }
 
-// renderMesh renders a mesh sample with the given traffic parameters.
-func renderMesh(t *testing.T, file, mesh string, params map[string]any) (*RenderOutput, error) {
-	t.Helper()
-	input := &RenderInput{
-		EndpointTypeSpec: loadClusterEndpointType(t, file),
-		Backends:         meshBackends(),
-		TakeOver:         meshTakeOver(),
-		Metadata:         fixtureMetadata(),
-		DataPlane:        meshDataPlane(mesh),
-		Environment:      fixtureGateway(),
-	}
-	if params != nil {
-		input.Parameters = rawExt(t, params)
-	}
-	return NewPipeline().Render(context.Background(), input)
+func sampleDataPlane(annotations map[string]string) DataPlaneContext {
+	return BuildDataPlaneContext(&v1alpha1.DataPlane{ObjectMeta: metav1.ObjectMeta{Annotations: annotations}})
 }
 
-// trafficParams is a header rule, a cookie rule and a 10% mirror.
-func trafficParams() map[string]any {
-	return map[string]any{
-		"rules": []any{
-			map[string]any{
-				"name":        "testers",
-				"matches":     []any{map[string]any{"headers": []any{map[string]any{"name": "x-canary", "value": "true"}}}},
-				"backendRefs": []any{map[string]any{"name": "canary"}},
-			},
-			map[string]any{
-				"name":        "arm-b",
-				"matches":     []any{map[string]any{"cookies": []any{map[string]any{"name": "ab", "value": "b"}}, "method": "GET"}},
-				"backendRefs": []any{map[string]any{"name": "canary"}},
+func sampleEnvironment() EnvironmentContext {
+	return BuildEnvironmentContext(nil, &v1alpha1.DataPlane{
+		Spec: v1alpha1.DataPlaneSpec{
+			Gateway: v1alpha1.GatewaySpec{
+				Ingress: &v1alpha1.GatewayNetworkSpec{
+					External: &v1alpha1.GatewayEndpointSpec{
+						Name: "gateway-default", Namespace: "openchoreo-data-plane",
+						HTTP: &v1alpha1.GatewayListenerSpec{Port: 19080, Host: "openchoreoapis.localhost"},
+					},
+				},
 			},
 		},
-		"mirrors": []any{map[string]any{"backendRef": "shadow", "percent": 10}},
-	}
+	})
 }
 
-func specOf(t *testing.T, out *RenderOutput) map[string]any {
+// renderSample renders a sample type for the trips Endpoint.
+func renderSample(t *testing.T, path string, visibility []string, annotations map[string]string, rules []Rule) (*RenderOutput, error) {
 	t.Helper()
-	require.Len(t, out.Entries, 1)
-	return out.Entries[0].Object["spec"].(map[string]any)
+	return NewPipeline().Render(context.Background(), &RenderInput{
+		EndpointTypeSpec: loadClusterEndpointType(t, path),
+		Visibility:       visibility,
+		Backends:         sampleBackends(),
+		Rules:            rules,
+		Metadata:         sampleMetadata(),
+		DataPlane:        sampleDataPlane(annotations),
+		Environment:      sampleEnvironment(),
+	})
 }
 
-func TestMeshGamma_WeightedOnly(t *testing.T) {
-	out, err := renderMesh(t, "mesh-gamma.yaml", "istio", nil)
+// byID indexes rendered entries by ID.
+func byID(out *RenderOutput) map[string]map[string]any {
+	m := make(map[string]map[string]any, len(out.Entries))
+	for _, e := range out.Entries {
+		m[e.ID] = e.Object
+	}
+	return m
+}
+
+func specOf(obj map[string]any) map[string]any {
+	return obj["spec"].(map[string]any)
+}
+
+var (
+	external = []string{"external"}
+	istio    = map[string]string{"openchoreo.dev/service-mesh": "istio"}
+)
+
+// meshRules is the mesh route of the trips Endpoint: the testers' header, the
+// cookie arm, then the 90/10 catch-all with a mirror.
+const meshRules = `[
+	{"matches":[{"headers":[{"type":"Exact","name":"x-canary","value":"true"}]}],
+	 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
+	{"matches":[{"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}]}],
+	 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
+	{"filters":[{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"e-trips-api-dev-trips-shadow","port":80},"percent":10}}],
+	 "backendRefs":[{"name":"e-trips-api-dev-trips-python","port":80,"weight":90},{"name":"e-trips-api-dev-trips-go","port":80,"weight":10}]}
+]`
+
+func TestHTTP_ServicesAndGatewayRouteWithoutMesh(t *testing.T) {
+	out, err := renderSample(t, httpSample, external, nil, sampleRules())
 	require.NoError(t, err)
+	entries := byID(out)
+	assert.NotContains(t, entries, "mesh-route", "no mesh on the data plane")
 
-	obj := out.Entries[0].Object
-	assert.Equal(t, "HTTPRoute", obj["kind"])
-	labels := obj["metadata"].(map[string]any)["labels"].(map[string]any)
-	assert.Equal(t, "project", labels["openchoreo.dev/endpoint-visibility"])
+	stable := entries["stable-service-0"]
+	require.NotNil(t, stable)
+	assert.Equal(t, "trips-api", stable["metadata"].(map[string]any)["name"])
+	assert.JSONEq(t, `{"openchoreo.dev/component-uid":"trips-python-uid","openchoreo.dev/environment-uid":"dev-uid"}`,
+		jsonOf(t, specOf(stable)["selector"]), "the stable Service selects the primary backend")
+	assert.JSONEq(t, `[{"name":"http","port":80,"targetPort":8080,"appProtocol":"http"}]`, jsonOf(t, specOf(stable)["ports"]))
 
-	spec := specOf(t, out)
-	assert.JSONEq(t, `[{"group":"","kind":"Service","name":"orders","port":8080}]`, jsonOf(t, spec["parentRefs"]))
-	assert.JSONEq(t, `[{"backendRefs":[
-		{"name":"orders","port":8080,"weight":90},
-		{"name":"orders-v2","port":8080,"weight":10}
-	]}]`, jsonOf(t, spec["rules"]), "the weight-0 shadow is left out of the default split")
+	for i, name := range []string{"trips-python", "trips-go", "trips-shadow"} {
+		svc := entries["backend-service-"+string(rune('0'+i))]
+		require.NotNil(t, svc, name)
+		assert.Equal(t, "e-trips-api-dev-"+name, svc["metadata"].(map[string]any)["name"])
+	}
+
+	policy := entries["gateway-ingress-0"]
+	require.NotNil(t, policy, "the gateway may reach backends that declare no visibility themselves")
+	assert.JSONEq(t, `[{"from":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"openchoreo-data-plane"}}}],
+		"ports":[{"port":8080,"protocol":"TCP"}]}]`, jsonOf(t, specOf(policy)["ingress"]))
+
+	route := entries["gateway-route-0"]
+	require.NotNil(t, route)
+	assert.Equal(t, "e-trips-api-dev-external", route["metadata"].(map[string]any)["name"])
+	assert.JSONEq(t, `["development-default.openchoreoapis.localhost"]`, jsonOf(t, specOf(route)["hostnames"]))
+	path := `"path":{"type":"PathPrefix","value":"/trips-api"}`
+	rewrite := `{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplacePrefixMatch","replacePrefixMatch":"/"}}}`
+	assert.JSONEq(t, `[
+		{"matches":[{`+path+`,"headers":[{"type":"Exact","name":"x-canary","value":"true"}]}],
+		 "filters":[`+rewrite+`],
+		 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
+		{"matches":[{`+path+`,"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}]}],
+		 "filters":[`+rewrite+`],
+		 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
+		{"matches":[{`+path+`}],
+		 "filters":[`+rewrite+`,{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"e-trips-api-dev-trips-shadow","port":80},"percent":10}}],
+		 "backendRefs":[{"name":"e-trips-api-dev-trips-python","port":80,"weight":90},{"name":"e-trips-api-dev-trips-go","port":80,"weight":10}]}
+	]`, jsonOf(t, specOf(route)["rules"]), "the weight-0 shadow is only mirrored to")
 }
+
+func TestHTTP_OneSplitForGatewayAndMesh(t *testing.T) {
+	t.Run("gateway outside the mesh: both routes split the same way", func(t *testing.T) {
+		out, err := renderSample(t, httpSample, external, istio, sampleRules())
+		require.NoError(t, err)
+		entries := byID(out)
+		mesh := entries["mesh-route"]
+		require.NotNil(t, mesh)
+		assert.JSONEq(t, `[{"group":"","kind":"Service","name":"trips-api","port":80}]`, jsonOf(t, specOf(mesh)["parentRefs"]))
+		assert.JSONEq(t, meshRules, jsonOf(t, specOf(mesh)["rules"]))
+
+		gw := specOf(entries["gateway-route-0"])["rules"].([]any)
+		require.Len(t, gw, 3)
+		last := gw[2].(map[string]any)
+		assert.JSONEq(t, `[{"name":"e-trips-api-dev-trips-python","port":80,"weight":90},{"name":"e-trips-api-dev-trips-go","port":80,"weight":10}]`,
+			jsonOf(t, last["backendRefs"]), "the gateway carries the mesh route's weights")
+	})
+
+	t.Run("gateway in the mesh: the gateway forwards and only the mesh splits", func(t *testing.T) {
+		out, err := renderSample(t, httpSample, external,
+			map[string]string{"openchoreo.dev/service-mesh": "istio", "openchoreo.dev/gateway-in-mesh": "true"}, sampleRules())
+		require.NoError(t, err)
+		entries := byID(out)
+		assert.JSONEq(t, `[{
+			"matches":[{"path":{"type":"PathPrefix","value":"/trips-api"}}],
+			"filters":[{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplacePrefixMatch","replacePrefixMatch":"/"}}}],
+			"backendRefs":[{"name":"trips-api","port":80}]
+		}]`, jsonOf(t, specOf(entries["gateway-route-0"])["rules"]))
+		assert.JSONEq(t, meshRules, jsonOf(t, specOf(entries["mesh-route"])["rules"]))
+	})
+}
+
+func TestHTTP_Visibility(t *testing.T) {
+	out, err := renderSample(t, httpSample, []string{"namespace"}, istio, sampleRules())
+	require.NoError(t, err)
+	entries := byID(out)
+	assert.NotContains(t, entries, "gateway-route-0", "namespace visibility has no gateway route")
+	assert.NotContains(t, entries, "gateway-ingress-0", "nor a gateway NetworkPolicy")
+	assert.Contains(t, entries, "mesh-route")
+
+	_, err = renderSample(t, httpSample, []string{"internal"}, nil, sampleRules())
+	require.Error(t, err, "the environment has no internal gateway")
+	assert.Contains(t, err.Error(), "no gateway for one of the Endpoint's visibilities")
+}
+
+func TestHTTP_LinkerdRefusesMirrors(t *testing.T) {
+	_, err := renderSample(t, httpSample, external, map[string]string{"openchoreo.dev/service-mesh": "linkerd"}, sampleRules())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Linkerd does not support request mirroring")
+}
+
+var namespaceOnly = []string{"namespace"}
 
 func TestMeshGamma_RulesAndMirror(t *testing.T) {
-	out, err := renderMesh(t, "mesh-gamma.yaml", "cilium", trafficParams())
+	out, err := renderSample(t, filepath.Join(meshSamplesDir, "mesh-gamma.yaml"), namespaceOnly,
+		map[string]string{"openchoreo.dev/service-mesh": "cilium"}, sampleRules())
 	require.NoError(t, err)
-
-	assert.JSONEq(t, `[
-		{"matches":[{"headers":[{"type":"Exact","name":"x-canary","value":"true"}]}],
-		 "backendRefs":[{"name":"orders-v2","port":8080,"weight":1}]},
-		{"matches":[{"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}],"method":"GET"}],
-		 "backendRefs":[{"name":"orders-v2","port":8080,"weight":1}]},
-		{"backendRefs":[{"name":"orders","port":8080,"weight":90},{"name":"orders-v2","port":8080,"weight":10}],
-		 "filters":[{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"orders-v3","port":8080},"percent":10}}]}
-	]`, jsonOf(t, specOf(t, out)["rules"]))
+	route := byID(out)["mesh-route"]
+	assert.JSONEq(t, `[{"group":"","kind":"Service","name":"trips-api","port":80}]`, jsonOf(t, specOf(route)["parentRefs"]))
+	assert.JSONEq(t, meshRules, jsonOf(t, specOf(route)["rules"]))
+	assert.Contains(t, byID(out), "stable-service-0")
 }
 
-func TestMeshGamma_Refusals(t *testing.T) {
-	t.Run("no mesh on the data plane", func(t *testing.T) {
-		_, err := renderMesh(t, "mesh-gamma.yaml", "", nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "openchoreo.dev/service-mesh")
-	})
-	t.Run("rule targets an unknown backend", func(t *testing.T) {
-		params := trafficParams()
-		params["rules"].([]any)[0].(map[string]any)["backendRefs"] = []any{map[string]any{"name": "missing"}}
-		_, err := renderMesh(t, "mesh-gamma.yaml", "istio", params)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "a rule targets a backend")
-	})
-	t.Run("mirroring on Linkerd", func(t *testing.T) {
-		_, err := renderMesh(t, "mesh-gamma.yaml", "linkerd", trafficParams())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Linkerd does not support request mirroring")
-	})
-	t.Run("parameters outside the schema", func(t *testing.T) {
-		_, err := renderMesh(t, "mesh-gamma.yaml", "istio", map[string]any{
-			"mirrors": []any{map[string]any{"backendRef": "shadow", "percent": 150}},
+func TestMeshSamples_Refusals(t *testing.T) {
+	for _, file := range []string{"mesh-gamma.yaml", "istio-virtualservice.yaml", "cilium-cec.yaml"} {
+		t.Run(file+": no mesh", func(t *testing.T) {
+			_, err := renderSample(t, filepath.Join(meshSamplesDir, file), namespaceOnly, nil, sampleRules())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "openchoreo.dev/service-mesh")
 		})
-		require.Error(t, err)
-	})
-}
-
-// TestMeshSamples_ShareTrafficSchema keeps each type's copy of the traffic
-// schema identical to traffic-schema.yaml.
-func TestMeshSamples_ShareTrafficSchema(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(meshSamplesDir, "traffic-schema.yaml"))
-	require.NoError(t, err)
-	var shared v1alpha1.SchemaSection
-	require.NoError(t, yaml.UnmarshalStrict(data, &shared))
-
-	for _, file := range meshSampleFiles {
-		t.Run(file, func(t *testing.T) {
-			spec := loadClusterEndpointType(t, file)
-			require.NotNil(t, spec.Parameters)
-			assert.JSONEq(t, canonicalJSON(t, shared.OpenAPIV3Schema.Raw), canonicalJSON(t, spec.Parameters.OpenAPIV3Schema.Raw))
+		t.Run(file+": gateway visibility", func(t *testing.T) {
+			mesh := map[string]string{"mesh-gamma.yaml": "istio", "istio-virtualservice.yaml": "istio", "cilium-cec.yaml": "cilium"}[file]
+			_, err := renderSample(t, filepath.Join(meshSamplesDir, file), external,
+				map[string]string{"openchoreo.dev/service-mesh": mesh}, sampleRules())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "serves in-cluster callers only")
 		})
 	}
-}
-
-// meshSampleFiles are the EndpointTypes that carry the shared traffic schema.
-var meshSampleFiles = []string{"mesh-gamma.yaml", "istio-virtualservice.yaml", "cilium-cec.yaml"}
-
-func canonicalJSON(t *testing.T, raw []byte) string {
-	t.Helper()
-	var v any
-	require.NoError(t, json.Unmarshal(raw, &v))
-	return jsonOf(t, v)
+	_, err := renderSample(t, filepath.Join(meshSamplesDir, "mesh-gamma.yaml"), namespaceOnly,
+		map[string]string{"openchoreo.dev/service-mesh": "linkerd"}, sampleRules())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Linkerd does not support request mirroring")
 }
 
 func TestIstioVirtualService_RulesAndMirror(t *testing.T) {
-	out, err := renderMesh(t, "istio-virtualservice.yaml", "istio", trafficParams())
+	out, err := renderSample(t, filepath.Join(meshSamplesDir, "istio-virtualservice.yaml"), namespaceOnly, istio, sampleRules())
 	require.NoError(t, err)
+	vs := byID(out)["virtual-service"]
+	assert.Equal(t, "VirtualService", vs["kind"])
+	assert.JSONEq(t, `["trips-api.`+sampleNS+`.svc.cluster.local"]`, jsonOf(t, specOf(vs)["hosts"]))
 
-	obj := out.Entries[0].Object
-	assert.Equal(t, "VirtualService", obj["kind"])
-	spec := specOf(t, out)
-	assert.JSONEq(t, `["orders.dp-default-shop-dev-a1b2c3d.svc.cluster.local"]`, jsonOf(t, spec["hosts"]))
-
-	host := func(svc string) string { return svc + ".dp-default-shop-dev-a1b2c3d.svc.cluster.local" }
+	dest := func(name string) string {
+		return `{"host":"e-trips-api-dev-` + name + `.` + sampleNS + `.svc.cluster.local","port":{"number":80}}`
+	}
 	assert.JSONEq(t, `[
 		{"name":"testers","match":[{"headers":{"x-canary":{"exact":"true"}}}],
-		 "route":[{"destination":{"host":"`+host("orders-v2")+`","port":{"number":8080}},"weight":1}]},
-		{"name":"arm-b","match":[{"headers":{"cookie":{"regex":"(.*;\\s*)?ab=b(;.*)?"}},"method":{"exact":"GET"}}],
-		 "route":[{"destination":{"host":"`+host("orders-v2")+`","port":{"number":8080}},"weight":1}]},
+		 "route":[{"destination":`+dest("trips-go")+`,"weight":1}]},
+		{"name":"arm-b","match":[{"headers":{"cookie":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}}],
+		 "route":[{"destination":`+dest("trips-go")+`,"weight":1}]},
 		{"name":"default",
-		 "route":[
-		   {"destination":{"host":"`+host("orders")+`","port":{"number":8080}},"weight":90},
-		   {"destination":{"host":"`+host("orders-v2")+`","port":{"number":8080}},"weight":10}],
-		 "mirrors":[{"destination":{"host":"`+host("orders-v3")+`","port":{"number":8080}},"percentage":{"value":10}}]}
-	]`, jsonOf(t, spec["http"]))
-}
-
-func TestIstioVirtualService_NeedsIstio(t *testing.T) {
-	_, err := renderMesh(t, "istio-virtualservice.yaml", "cilium", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "openchoreo.dev/service-mesh=istio")
+		 "route":[{"destination":`+dest("trips-python")+`,"weight":90},{"destination":`+dest("trips-go")+`,"weight":10}],
+		 "mirrors":[{"destination":`+dest("trips-shadow")+`,"percentage":{"value":10}}]}
+	]`, jsonOf(t, specOf(vs)["http"]))
 }
 
 func TestCiliumEnvoyConfig_RulesAndMirror(t *testing.T) {
-	out, err := renderMesh(t, "cilium-cec.yaml", "cilium", trafficParams())
+	out, err := renderSample(t, filepath.Join(meshSamplesDir, "cilium-cec.yaml"), namespaceOnly,
+		map[string]string{"openchoreo.dev/service-mesh": "cilium"}, sampleRules())
 	require.NoError(t, err)
-
-	obj := out.Entries[0].Object
-	assert.Equal(t, "CiliumEnvoyConfig", obj["kind"])
-	annotations := obj["metadata"].(map[string]any)["annotations"].(map[string]any)
+	cec := byID(out)["envoy-config"]
+	assert.Equal(t, "CiliumEnvoyConfig", cec["kind"])
+	annotations := cec["metadata"].(map[string]any)["annotations"].(map[string]any)
 	assert.Equal(t, "false", annotations["cec.cilium.io/use-original-source-address"])
 
-	spec := specOf(t, out)
-	ns := "dp-default-shop-dev-a1b2c3d"
-	assert.JSONEq(t, `[{"name":"orders","namespace":"`+ns+`"}]`, jsonOf(t, spec["services"]))
-	assert.JSONEq(t, `[{"name":"orders-v2","namespace":"`+ns+`"},{"name":"orders-v3","namespace":"`+ns+`"}]`,
-		jsonOf(t, spec["backendServices"]), "the taken-over Service is redirected, not just synced")
-
+	spec := specOf(cec)
+	assert.JSONEq(t, `[{"name":"trips-api","namespace":"`+sampleNS+`"}]`, jsonOf(t, spec["services"]),
+		"the stable Service is redirected to Envoy")
 	resources := spec["resources"].([]any)
 	require.Len(t, resources, 5, "a listener, a route configuration and one cluster per backend")
+	cluster := func(name string) string { return sampleNS + "/e-trips-api-dev-" + name }
 	routes := resources[1].(map[string]any)["virtual_hosts"].([]any)[0].(map[string]any)["routes"]
 	assert.JSONEq(t, `[
 		{"match":{"prefix":"/","headers":[{"name":"x-canary","string_match":{"exact":"true"}}]},
-		 "route":{"weighted_clusters":{"clusters":[{"name":"`+ns+`/orders-v2","weight":1}]}}},
-		{"match":{"prefix":"/","headers":[
-		   {"name":"cookie","string_match":{"safe_regex":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}},
-		   {"name":":method","string_match":{"exact":"GET"}}]},
-		 "route":{"weighted_clusters":{"clusters":[{"name":"`+ns+`/orders-v2","weight":1}]}}},
+		 "route":{"weighted_clusters":{"clusters":[{"name":"`+cluster("trips-go")+`","weight":1}]}}},
+		{"match":{"prefix":"/","headers":[{"name":"cookie","string_match":{"safe_regex":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}}]},
+		 "route":{"weighted_clusters":{"clusters":[{"name":"`+cluster("trips-go")+`","weight":1}]}}},
 		{"match":{"prefix":"/"},
 		 "route":{
-		   "weighted_clusters":{"clusters":[{"name":"`+ns+`/orders","weight":90},{"name":"`+ns+`/orders-v2","weight":10}]},
-		   "request_mirror_policies":[{"cluster":"`+ns+`/orders-v3","runtime_fraction":{"default_value":{"numerator":10,"denominator":"HUNDRED"}}}]}}
+		   "weighted_clusters":{"clusters":[{"name":"`+cluster("trips-python")+`","weight":90},{"name":"`+cluster("trips-go")+`","weight":10}]},
+		   "request_mirror_policies":[{"cluster":"`+cluster("trips-shadow")+`","runtime_fraction":{"default_value":{"numerator":10,"denominator":"HUNDRED"}}}]}}
 	]`, jsonOf(t, routes))
-	assert.JSONEq(t, `{"@type":"type.googleapis.com/envoy.config.cluster.v3.Cluster","name":"`+ns+`/orders","type":"EDS","connect_timeout":"5s"}`,
-		jsonOf(t, resources[2]))
 }

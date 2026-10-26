@@ -19,10 +19,6 @@ const (
 
 	// ConditionFinalizing indicates that the Component is being finalized (deleted).
 	ConditionFinalizing controller.ConditionType = "Finalizing"
-
-	// ConditionEndpointsExposed reports whether the Workload endpoints that name an
-	// EndpointType are served through their Endpoints. Absent when none do.
-	ConditionEndpointsExposed controller.ConditionType = "EndpointsExposed"
 )
 
 // Constants for condition reasons
@@ -71,14 +67,6 @@ const (
 
 	// Endpoint exposure (EndpointsExposed condition)
 
-	// ReasonEndpointsExposed indicates every exposed workload endpoint has its Endpoint
-	ReasonEndpointsExposed controller.ConditionReason = "EndpointsExposed"
-	// ReasonExposeConflict indicates the named Endpoint exists but doesn't route to this component
-	ReasonExposeConflict controller.ConditionReason = "ExposeConflict"
-	// ReasonEndpointTypeMismatch indicates the Workload names a different type than the Endpoint has
-	ReasonEndpointTypeMismatch controller.ConditionReason = "TypeMismatch"
-	// ReasonEndpointTypeNotFound indicates the named EndpointType or ClusterEndpointType doesn't exist
-	ReasonEndpointTypeNotFound controller.ConditionReason = "EndpointTypeNotFound"
 )
 
 // NewComponentStillRoutedCondition creates a condition indicating deletion is

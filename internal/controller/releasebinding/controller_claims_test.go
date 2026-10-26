@@ -24,15 +24,13 @@ func claimsTestEndpoint(project string, components ...string) *openchoreov1alpha
 	ep := &openchoreov1alpha1.Endpoint{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: "default"},
 		Spec: openchoreov1alpha1.EndpointSpec{
-			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: project},
-			Type:  openchoreov1alpha1.EndpointTypeRef{Name: "http-weighted"},
+			Owner:      openchoreov1alpha1.EndpointOwner{ProjectName: project},
+			Type:       openchoreov1alpha1.EndpointTypeRef{Name: "http"},
+			Visibility: externalOnly,
 		},
 	}
 	for _, c := range components {
 		ep.Spec.BackendRefs = append(ep.Spec.BackendRefs, openchoreov1alpha1.EndpointBackendRef{Name: c, Component: &openchoreov1alpha1.EndpointComponentRef{Name: c, Endpoint: "http"}})
-	}
-	if len(components) > 0 {
-		ep.Spec.TakeOver = &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: components[0], Endpoint: "http"}}
 	}
 	return ep
 }
@@ -131,16 +129,9 @@ func TestClaimedEndpoints(t *testing.T) {
 			},
 		},
 		{
-			name: "claim that serves only another component",
+			name: "claim accepted before this component was added",
 			objs: []client.Object{
 				claimsTestEndpoint("shop", "payments-v1", "payments-v2"),
-				claimsTestBinding("dev", servingClaim(false, "payments-v2")),
-			},
-		},
-		{
-			name: "Endpoint that routes to this component but serves another component's URL",
-			objs: []client.Object{
-				claimsTestEndpoint("shop", "payments-v2", "payments-v1"),
 				claimsTestBinding("dev", servingClaim(false, "payments-v2")),
 			},
 		},

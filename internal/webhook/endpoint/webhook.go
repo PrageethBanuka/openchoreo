@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,14 +35,12 @@ func SetupEndpointWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:webhook:path=/validate-openchoreo-dev-v1alpha1-endpoint,mutating=false,failurePolicy=fail,sideEffects=None,groups=openchoreo.dev,resources=endpoints,verbs=create;update,versions=v1alpha1,name=vendpoint-v1alpha1.kb.io,admissionReviewVersions=v1
 
-// Validator keeps one route per address. It refuses an Endpoint whose address
-// another Endpoint already serves, whose path is a component's own route path
-// without a take-over of it, or whose take-over another Endpoint already
-// holds. It also holds the EndpointType's limits (address kind, allowed
+// Validator keeps one route per slot: it refuses an Endpoint that routes to a
+// component workload endpoint in a visibility another Endpoint of the project
+// already routes it in. It also holds the EndpointType's limits (allowed
 // hostnames and backend kinds, the parameters schema) and refuses a split with
-// no weighted backend. Each refusal
-// says what to do instead. The Endpoint and binding controllers enforce the
-// same rules when this webhook is bypassed.
+// no weighted backend. Each refusal says what to do instead. The Endpoint
+// controller enforces the slot rule when this webhook is bypassed.
 type Validator struct {
 	Client client.Reader
 }
@@ -72,10 +71,12 @@ func (v *Validator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.O
 	if !ep.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-	claimsChanged := !equality.Semantic.DeepEqual(ep.Spec.Address, oldEp.Spec.Address) ||
-		!equality.Semantic.DeepEqual(ep.Spec.TakeOver, oldEp.Spec.TakeOver)
 	backendsChanged := !equality.Semantic.DeepEqual(ep.Spec.BackendRefs, oldEp.Spec.BackendRefs) ||
+		!equality.Semantic.DeepEqual(ep.Spec.Rules, oldEp.Spec.Rules) ||
 		!equality.Semantic.DeepEqual(ep.Spec.Parameters, oldEp.Spec.Parameters)
+	claimsChanged := !equality.Semantic.DeepEqual(ep.Spec.BackendRefs, oldEp.Spec.BackendRefs) ||
+		!equality.Semantic.DeepEqual(ep.Spec.Visibility, oldEp.Spec.Visibility) ||
+		ep.Spec.Owner != oldEp.Spec.Owner
 	if !claimsChanged && !backendsChanged {
 		return nil, nil
 	}
@@ -91,7 +92,7 @@ func (v *Validator) validate(ctx context.Context, ep *openchoreodevv1alpha1.Endp
 	var errs field.ErrorList
 	spec := field.NewPath("spec")
 
-	if backends && len(ep.Spec.BackendRefs) > 0 && !hasWeightedBackend(ep.Spec.BackendRefs) {
+	if backends && len(ep.Spec.BackendRefs) > 0 && !hasCatchAllRule(ep) && !hasWeightedBackend(ep.Spec.BackendRefs) {
 		errs = append(errs, field.Invalid(spec.Child("backendRefs"), "",
 			"every backend has weight 0, so the Endpoint would serve nothing; give at least one backend a weight above 0"))
 	}
@@ -117,9 +118,8 @@ func (v *Validator) validate(ctx context.Context, ep *openchoreodevv1alpha1.Endp
 	return apierrors.NewInvalid(openchoreodevv1alpha1.GroupVersion.WithKind("Endpoint").GroupKind(), ep.Name, errs)
 }
 
-// validateTypeLimits checks the address, hostname, backend kinds and
-// parameters against the EndpointType. A missing type is left to the
-// controller, which reports it.
+// validateTypeLimits checks the hostname, backend kinds and parameters against
+// the EndpointType. A missing type is left to the controller, which reports it.
 func (v *Validator) validateTypeLimits(ctx context.Context, ep *openchoreodevv1alpha1.Endpoint, spec *field.Path) (field.ErrorList, error) {
 	typeSpec, err := v.typeSpec(ctx, ep)
 	if err != nil || typeSpec == nil {
@@ -127,106 +127,54 @@ func (v *Validator) validateTypeLimits(ctx context.Context, ep *openchoreodevv1a
 	}
 	hostnames, kinds := typeSpec.AllowedHostnames, typeSpec.AllowedBackendKinds
 	var errs field.ErrorList
-	errs = append(errs, validateAddressKind(ep, typeSpec, spec)...)
 	errs = append(errs, validateParameters(ep, typeSpec, spec)...)
-	if h := addressHostname(ep); h != "" && !controller.HostMatches(h, hostnames) {
+	if h := parameterHostname(ep); h != "" && !controller.HostMatches(h, hostnames) {
 		msg := fmt.Sprintf("hostname %q is not allowed by %s %q", h, typeKind(ep), ep.Spec.Type.Name)
 		if len(hostnames) == 0 {
 			msg += "; this type serves only the environment's gateway host, so leave hostname empty"
 		} else {
 			msg += "; allowed: " + strings.Join(hostnames, ", ")
 		}
-		errs = append(errs, field.Forbidden(spec.Child("address", "hostname"), msg))
+		errs = append(errs, field.Forbidden(spec.Child("parameters", "hostname"), msg))
 	}
 	if len(kinds) == 0 {
 		kinds = []openchoreodevv1alpha1.EndpointBackendKind{openchoreodevv1alpha1.EndpointBackendKindComponent}
 	}
 	for i, ref := range ep.Spec.BackendRefs {
-		allowed := false
-		for _, k := range kinds {
-			if k == ref.Kind() {
-				allowed = true
-			}
+		kind := ref.Kind
+		if kind == "" {
+			kind = openchoreodevv1alpha1.EndpointBackendKindComponent
 		}
-		if !allowed {
+		if !slices.Contains(kinds, kind) {
 			errs = append(errs, field.Forbidden(spec.Child("backendRefs").Index(i),
 				fmt.Sprintf("%s %q does not allow %s backends; ask a platform engineer to add %s to allowedBackendKinds, or use another type",
-					typeKind(ep), ep.Spec.Type.Name, ref.Kind(), ref.Kind())))
+					typeKind(ep), ep.Spec.Type.Name, kind, kind)))
 		}
 	}
 	return errs, nil
 }
 
-// validateClaims checks the address and the take-over against the other
-// Endpoints and against component routes.
+// validateClaims checks the Endpoint's slots against the other Endpoints: two
+// Endpoints of a project may route to the same component workload endpoint,
+// but not in the same visibility, since each would render a route for it.
 func (v *Validator) validateClaims(ctx context.Context, ep *openchoreodevv1alpha1.Endpoint, spec *field.Path) (field.ErrorList, error) {
 	var others openchoreodevv1alpha1.EndpointList
-	if err := v.Client.List(ctx, &others); err != nil {
+	if err := v.Client.List(ctx, &others, client.InNamespace(ep.Namespace)); err != nil {
 		return nil, apierrors.NewInternalError(fmt.Errorf("list endpoints: %w", err))
 	}
 	var errs field.ErrorList
 	for i := range others.Items {
 		other := &others.Items[i]
-		if (other.Name == ep.Name && other.Namespace == ep.Namespace) || !other.DeletionTimestamp.IsZero() {
+		if other.Name == ep.Name || !other.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if controller.SameEndpointAddress(ep, other) {
-			errs = append(errs, field.Forbidden(spec.Child("address"),
-				fmt.Sprintf("%s is already served by Endpoint %s/%s; pick another path or hostname",
-					describeAddress(ep.Spec.Address), other.Namespace, other.Name)))
-		}
-		if controller.SameEndpointTakeOver(ep, other) {
-			t := controller.TakenOver(ep)
-			errs = append(errs, field.Forbidden(spec.Child("takeOver"),
-				fmt.Sprintf("the URL of %s/%s is already taken over by Endpoint %q; one Endpoint takes a URL over",
-					t.Name, t.Endpoint, other.Name)))
-		}
-	}
-
-	// An address on the environment host must not be a component's own route
-	// path, unless this Endpoint takes that route over.
-	if ep.Spec.Address != nil && ep.Spec.Address.Hostname == "" {
-		owner, err := v.componentServingPath(ctx, ep)
-		if err != nil {
-			return nil, err
-		}
-		if owner != "" {
-			errs = append(errs, field.Forbidden(spec.Child("address", "path"),
-				fmt.Sprintf("%s is the URL path of component endpoint %s; take it over (spec.takeOver) to move it to this Endpoint, or pick another path",
-					ep.Spec.Address.Path, owner)))
+		if slot, ok := controller.SharedEndpointSlot(ep, other); ok {
+			errs = append(errs, field.Forbidden(spec.Child("backendRefs"),
+				fmt.Sprintf("Endpoint %q already routes %s/%s with %s visibility; add your backends to that Endpoint, or use another visibility",
+					other.Name, slot.Component, slot.Endpoint, slot.Visibility)))
 		}
 	}
 	return errs, nil
-}
-
-// componentServingPath returns "component/endpoint" when a component of the
-// namespace serves the Endpoint's path on an environment gateway host and the
-// Endpoint doesn't take that endpoint over.
-func (v *Validator) componentServingPath(ctx context.Context, ep *openchoreodevv1alpha1.Endpoint) (string, error) {
-	var rbs openchoreodevv1alpha1.ReleaseBindingList
-	if err := v.Client.List(ctx, &rbs, client.InNamespace(ep.Namespace)); err != nil {
-		return "", apierrors.NewInternalError(fmt.Errorf("list release bindings: %w", err))
-	}
-	t := controller.TakenOver(ep)
-	for i := range rbs.Items {
-		rb := &rbs.Items[i]
-		for _, st := range rb.Status.Endpoints {
-			if t != nil && t.Name == rb.Spec.Owner.ComponentName && t.Endpoint == st.Name {
-				continue
-			}
-			for _, urls := range []*openchoreodevv1alpha1.EndpointGatewayURLs{st.ExternalURLs, st.InternalURLs} {
-				if urls == nil {
-					continue
-				}
-				for _, u := range []*openchoreodevv1alpha1.EndpointURL{urls.HTTPS, urls.HTTP, urls.TLS} {
-					if u != nil && u.Path == ep.Spec.Address.Path {
-						return rb.Spec.Owner.ComponentName + "/" + st.Name, nil
-					}
-				}
-			}
-		}
-	}
-	return "", nil
 }
 
 // typeSpec reads the Endpoint's (Cluster)EndpointType spec; nil when the type
@@ -251,32 +199,6 @@ func (v *Validator) typeSpec(ctx context.Context, ep *openchoreodevv1alpha1.Endp
 		return nil, apierrors.NewInternalError(err)
 	}
 	return &et.Spec, nil
-}
-
-// validateAddressKind checks the Endpoint against the type's address kind: a
-// Gateway type serves the Endpoint's own address, so it needs one; a Service
-// type serves the taken-over component's in-cluster Service, so it needs a
-// take-over and no address.
-func validateAddressKind(ep *openchoreodevv1alpha1.Endpoint, ts *openchoreodevv1alpha1.EndpointTypeSpec, spec *field.Path) field.ErrorList {
-	var errs field.ErrorList
-	if ts.ServesService() {
-		if ep.Spec.Address != nil {
-			errs = append(errs, field.Forbidden(spec.Child("address"),
-				fmt.Sprintf("%s %q serves the taken-over component's in-cluster Service, not an address of its own; remove spec.address",
-					typeKind(ep), ep.Spec.Type.Name)))
-		}
-		if ep.Spec.TakeOver == nil {
-			errs = append(errs, field.Required(spec.Child("takeOver"),
-				fmt.Sprintf("%s %q serves the in-cluster Service of a component endpoint; set spec.takeOver to the component endpoint whose callers it routes",
-					typeKind(ep), ep.Spec.Type.Name)))
-		}
-		return errs
-	}
-	if ep.Spec.Address == nil {
-		errs = append(errs, field.Required(spec.Child("address"),
-			fmt.Sprintf("%s %q serves the Endpoint's own address on a gateway; set spec.address.path", typeKind(ep), ep.Spec.Type.Name)))
-	}
-	return errs
 }
 
 // validateParameters checks spec.parameters against the type's parameters
@@ -322,21 +244,24 @@ func typeKind(ep *openchoreodevv1alpha1.Endpoint) openchoreodevv1alpha1.Endpoint
 	return ep.Spec.Type.Kind
 }
 
-// addressHostname is the Endpoint's own hostname, empty when it has none or no
-// address at all.
-func addressHostname(ep *openchoreodevv1alpha1.Endpoint) string {
-	if ep.Spec.Address == nil {
+// parameterHostname is the hostname the Endpoint asks its type to serve, by
+// the convention of a top-level "hostname" parameter; empty when it has none.
+func parameterHostname(ep *openchoreodevv1alpha1.Endpoint) string {
+	if ep.Spec.Parameters == nil || len(ep.Spec.Parameters.Raw) == 0 {
 		return ""
 	}
-	return ep.Spec.Address.Hostname
+	var params struct {
+		Hostname string `json:"hostname"`
+	}
+	if err := json.Unmarshal(ep.Spec.Parameters.Raw, &params); err != nil {
+		return ""
+	}
+	return params.Hostname
 }
 
-func describeAddress(a *openchoreodevv1alpha1.EndpointAddress) string {
-	if a == nil {
-		return "(none)"
-	}
-	if a.Hostname == "" {
-		return a.Path + " on the environment host"
-	}
-	return a.Hostname + a.Path
+// hasCatchAllRule reports whether the Endpoint's last rule has no matches, so
+// its weights, not backendRefs', split the unmatched traffic.
+func hasCatchAllRule(ep *openchoreodevv1alpha1.Endpoint) bool {
+	n := len(ep.Spec.Rules)
+	return n > 0 && len(ep.Spec.Rules[n-1].Matches) == 0
 }

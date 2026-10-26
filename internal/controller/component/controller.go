@@ -154,12 +154,6 @@ func (r *Reconciler) reconcileWithComponentType(ctx context.Context, comp *openc
 		return ctrl.Result{}, nil
 	}
 
-	// Create Endpoints for workload endpoints that ask to be served through one
-	if err := r.reconcileExposedEndpoints(ctx, comp, workload); err != nil {
-		logger.Error(err, "Failed to reconcile exposed Endpoints")
-		return ctrl.Result{}, err
-	}
-
 	// Validate traits
 	if !r.areValidTraits(ctx, comp, ct) {
 		// Validation failed, condition already set

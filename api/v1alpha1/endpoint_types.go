@@ -9,8 +9,9 @@ import (
 )
 
 // EndpointSpec defines the desired state of Endpoint.
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.takeOver) || !has(self.takeOver) || self.takeOver == oldSelf.takeOver",message="spec.takeOver can be added or removed but not changed"
-// +kubebuilder:validation:XValidation:rule="has(self.address) == has(oldSelf.address)",message="spec.address cannot be added or removed after creation; create a new Endpoint to serve another address"
+// +kubebuilder:validation:XValidation:rule="!has(self.rules) || self.rules.all(r, r.backends.all(b, self.backendRefs.exists(x, x.name == b.name)))",message="every rule backend must name a backend in spec.backendRefs"
+// +kubebuilder:validation:XValidation:rule="!has(self.rules) || self.rules.all(r, !has(r.mirrors) || r.mirrors.all(m, self.backendRefs.exists(x, x.name == m.backend)))",message="every mirror must name a backend in spec.backendRefs"
+// +kubebuilder:validation:XValidation:rule="!has(self.rules) || self.rules.all(r, (has(r.matches) && size(r.matches) > 0) || r.name == self.rules[size(self.rules) - 1].name)",message="only the last rule may have no matches; it is the catch-all"
 type EndpointSpec struct {
 	// Owner identifies the Project this Endpoint belongs to.
 	// +kubebuilder:validation:Required
@@ -23,60 +24,61 @@ type EndpointSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.type cannot be changed after creation"
 	Type EndpointTypeRef `json:"type"`
 
-	// Address is the URL this Endpoint serves: a path, on the environment's
-	// gateway host or on its own hostname. It belongs to the Endpoint, so it
-	// stays the same whatever backends answer it, and it is fixed at creation.
-	// Required when the EndpointType's addressKind is Gateway (the default);
-	// Service types serve the taken-over component's in-cluster Service
-	// instead and must leave it unset.
-	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.address cannot be changed after creation; create a new Endpoint to serve another address"
-	Address *EndpointAddress `json:"address,omitempty"`
+	// Visibility lists the scopes this Endpoint exposes its backends to. It is
+	// declared rather than inferred from rendered routes, so an EndpointType can
+	// render one route per requested visibility and the set of route slots this
+	// Endpoint occupies is known before anything is rendered. The project scope
+	// is implicit for every workload endpoint and is not a route an Endpoint
+	// renders, so it is not accepted here.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +listType=set
+	// +kubebuilder:validation:XValidation:rule="self.all(v, v != 'project')",message="project visibility is implicit for every workload endpoint and cannot be requested on an Endpoint"
+	Visibility []EndpointVisibility `json:"visibility"`
 
-	// TakeOver optionally makes the Endpoint also serve one component workload
-	// endpoint's existing URL, so clients of that URL move to the Endpoint
-	// without a gap. The component stops rendering its own route for it once
-	// the Endpoint's route is accepted, and renders it again when the take-over
-	// is removed. It can be added or removed, but not changed.
+	// AutoDeploy deploys the Endpoint to the first environment of its project's
+	// deployment pipeline: the Endpoint controller creates the EndpointReleaseBinding
+	// for that environment and advances it to each new EndpointRelease. Later
+	// environments are promoted explicitly, as with Component.spec.autoDeploy.
 	// +optional
-	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
+	AutoDeploy bool `json:"autoDeploy,omitempty"`
 
-	// BackendRefs lists what answers the Endpoint's traffic, with relative
-	// weights: component workload endpoints of the project, or external
-	// services. Like a Service selecting Pods, the Endpoint does not own them.
-	// An Endpoint may be left with no backends; see ReclaimPolicy.
+	// BackendRefs lists the backends this Endpoint routes traffic to, with
+	// relative weights. Like a Service selecting Pods, the Endpoint does not own
+	// the referenced components.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=map
+	// +listMapKey=name
+	BackendRefs []EndpointBackendRef `json:"backendRefs"`
+
+	// Rules route matching requests to chosen backends, ahead of the default
+	// split. They are evaluated in order and the first match wins; a rule with
+	// no matches is the catch-all and must come last. When unset, the Endpoint
+	// sends all traffic across backendRefs by weight.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
-	BackendRefs []EndpointBackendRef `json:"backendRefs,omitempty"`
+	// +kubebuilder:validation:MaxItems=16
+	Rules []EndpointRule `json:"rules,omitempty"`
 
-	// ReclaimPolicy decides what happens when the Endpoint has no backends left,
-	// for example after its last backend component was deleted. Delete removes
-	// the Endpoint and hands its URL back; Retain keeps it as Orphaned, without
-	// routes, until a backend is added.
+	// Schema is the API definition this Endpoint exposes. When unset it resolves
+	// from the backend's Workload endpoint schema at render time rather than
+	// being copied here, so a new build cannot leave the Endpoint holding a stale
+	// contract. Set it explicitly when backends disagree or the exposed surface
+	// differs from the backend's.
 	// +optional
-	// +kubebuilder:default=Delete
-	ReclaimPolicy EndpointReclaimPolicy `json:"reclaimPolicy,omitempty"`
+	Schema *EndpointSchema `json:"schema,omitempty"`
 
 	// Parameters contains values for the parameter schema declared on the referenced
-	// EndpointType (or ClusterEndpointType). Validated against the schema by the
-	// Endpoint controller; failures surface via status.conditions.
+	// EndpointType (or ClusterEndpointType). Validated against that schema at
+	// admission and at render time.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	Parameters *runtime.RawExtension `json:"parameters,omitempty"`
 }
-
-// EndpointReclaimPolicy decides what happens to an Endpoint with no backends.
-// +kubebuilder:validation:Enum=Delete;Retain
-type EndpointReclaimPolicy string
-
-const (
-	// EndpointReclaimPolicyDelete deletes an Endpoint once it has no backends.
-	EndpointReclaimPolicyDelete EndpointReclaimPolicy = "Delete"
-	// EndpointReclaimPolicyRetain keeps an Endpoint with no backends as Orphaned.
-	EndpointReclaimPolicyRetain EndpointReclaimPolicy = "Retain"
-)
 
 // EndpointOwner identifies the project that owns an Endpoint.
 type EndpointOwner struct {
@@ -85,88 +87,64 @@ type EndpointOwner struct {
 	ProjectName string `json:"projectName"`
 }
 
-// EndpointAddress is the URL an Endpoint serves.
-type EndpointAddress struct {
-	// Path is the path prefix clients call, for example /payments.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=200
-	// +kubebuilder:validation:Pattern=`^/[a-z0-9]([-a-z0-9/._]*[a-z0-9])?$`
-	Path string `json:"path"`
-
-	// Hostname is the Endpoint's own hostname, for example payments.example.com.
-	// It must match the EndpointType's allowedHostnames, and each environment's
-	// binding can override it. When unset, the environment's gateway host is
-	// used, the same host component URLs use.
+// EndpointSchema is the API definition an Endpoint exposes.
+type EndpointSchema struct {
+	// Type is the kind of definition, for example OpenAPI or GraphQL.
 	// +optional
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$`
-	Hostname string `json:"hostname,omitempty"`
-}
-
-// EndpointTakeOver names the component workload endpoint whose existing URL
-// an Endpoint also serves.
-type EndpointTakeOver struct {
-	// Component is the workload endpoint whose URL is taken over.
-	// +kubebuilder:validation:Required
-	Component EndpointComponentRef `json:"component"`
+	Type string `json:"type,omitempty"`
+	// Content is the definition itself.
+	// +optional
+	Content string `json:"content,omitempty"`
 }
 
 // EndpointComponentRef names a workload endpoint of a component in the
 // Endpoint's project.
 type EndpointComponentRef struct {
-	// Name is the name of the Component.
+	// Name is the name of the Component that serves this backend, in the
+	// Endpoint's project.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 
 	// Endpoint is the name of the endpoint in the component's
-	// Workload.spec.endpoints. Determines the port and protocol.
+	// Workload.spec.endpoints to route to. Determines the backend port and protocol.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Endpoint string `json:"endpoint"`
 }
 
-// EndpointExternalRef is a service outside OpenChoreo.
-type EndpointExternalRef struct {
-	// URL is the service's base URL, for example https://legacy.example.com.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=2048
-	// +kubebuilder:validation:Pattern=`^https?://[a-zA-Z0-9]([-a-zA-Z0-9.]*[a-zA-Z0-9])?(:[0-9]{1,5})?(/.*)?$`
-	URL string `json:"url"`
-}
-
 // EndpointBackendKind is the kind of an Endpoint backend.
-// +kubebuilder:validation:Enum=Component;External
+// +kubebuilder:validation:Enum=Component
 type EndpointBackendKind string
 
 const (
 	// EndpointBackendKindComponent is a component workload endpoint.
 	EndpointBackendKindComponent EndpointBackendKind = "Component"
-	// EndpointBackendKindExternal is a service outside OpenChoreo.
-	EndpointBackendKindExternal EndpointBackendKind = "External"
 )
 
-// EndpointBackendRef is one backend of an Endpoint: a component workload
-// endpoint or an external service, with its relative weight.
-// +kubebuilder:validation:XValidation:rule="has(self.component) != has(self.external)",message="a backend sets exactly one of component or external"
+// EndpointBackendRef is one traffic backend of an Endpoint. It is a
+// discriminated union on kind; exactly the payload matching kind must be set.
+// +kubebuilder:validation:XValidation:rule="self.kind != 'Component' || has(self.component)",message="component must be set when kind is Component"
 type EndpointBackendRef struct {
-	// Name identifies the backend within the Endpoint, for example payments-v1
-	// or legacy. Per-environment overrides refer to it.
+	// Name identifies this backend within the Endpoint. It is the list's map key,
+	// the handle status reports resolution against, and what rules, overrides and
+	// templates use to single out one backend.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 
-	// Component is a workload endpoint of a component in the Endpoint's project.
+	// Kind is the kind of backend this entry references.
+	// +optional
+	// +kubebuilder:default=Component
+	Kind EndpointBackendKind `json:"kind,omitempty"`
+
+	// Component references a workload endpoint of a Component in the Endpoint's
+	// project. Required when kind is Component.
 	// +optional
 	Component *EndpointComponentRef `json:"component,omitempty"`
-
-	// External is a service outside OpenChoreo. Its URL is the default for every
-	// environment; a binding can override it.
-	// +optional
-	External *EndpointExternalRef `json:"external,omitempty"`
 
 	// Weight is the proportion of traffic sent to this backend relative to the
 	// sum of all backend weights. Follows Gateway API backendRef weight semantics:
@@ -178,12 +156,144 @@ type EndpointBackendRef struct {
 	Weight *int32 `json:"weight,omitempty"`
 }
 
-// Kind returns whether the backend is a component or an external service.
-func (b EndpointBackendRef) Kind() EndpointBackendKind {
-	if b.External != nil {
-		return EndpointBackendKindExternal
-	}
-	return EndpointBackendKindComponent
+// EndpointRule sends requests that match it to chosen backends.
+type EndpointRule struct {
+	// Name identifies the rule, so automation and GitOps can own it.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// Matches select the requests this rule applies to: a request matches when
+	// any entry matches, and an entry matches when all of its conditions hold.
+	// A rule without matches applies to every request; only the last rule may
+	// omit them.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	Matches []EndpointMatch `json:"matches,omitempty"`
+
+	// Backends are the backends matching requests go to, by name, with relative
+	// weights.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=map
+	// +listMapKey=name
+	Backends []EndpointRuleBackend `json:"backends"`
+
+	// Mirrors copy a share of this rule's requests to other backends and
+	// discard their responses.
+	// +optional
+	// +kubebuilder:validation:MaxItems=4
+	Mirrors []EndpointMirror `json:"mirrors,omitempty"`
+}
+
+// EndpointMatch is one set of conditions a request must all meet.
+type EndpointMatch struct {
+	// Headers the request must carry.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	Headers []EndpointHeaderMatch `json:"headers,omitempty"`
+
+	// Cookies the request must carry, by exact value. EndpointTypes render a
+	// cookie as a match on the Cookie header.
+	// +optional
+	// +kubebuilder:validation:MaxItems=1
+	Cookies []EndpointCookieMatch `json:"cookies,omitempty"`
+
+	// QueryParams the request URL must carry, by exact value.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	QueryParams []EndpointQueryParamMatch `json:"queryParams,omitempty"`
+}
+
+// EndpointHeaderMatchType is how a header value is compared.
+// +kubebuilder:validation:Enum=Exact;RegularExpression
+type EndpointHeaderMatchType string
+
+const (
+	// EndpointHeaderMatchExact compares the header value exactly.
+	EndpointHeaderMatchExact EndpointHeaderMatchType = "Exact"
+	// EndpointHeaderMatchRegularExpression matches the value against a regular expression.
+	EndpointHeaderMatchRegularExpression EndpointHeaderMatchType = "RegularExpression"
+)
+
+// EndpointHeaderMatch is a header condition.
+type EndpointHeaderMatch struct {
+	// Name is the header name, case-insensitive.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9!#$%&'*+\-.^_\x60|~]+$`
+	Name string `json:"name"`
+
+	// Type is how the value is compared.
+	// +optional
+	// +kubebuilder:default=Exact
+	Type EndpointHeaderMatchType `json:"type,omitempty"`
+
+	// Value is the expected value, or the regular expression.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=4096
+	Value string `json:"value"`
+}
+
+// EndpointCookieMatch is a cookie condition.
+type EndpointCookieMatch struct {
+	// Name is the cookie name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_-]{1,64}$`
+	Name string `json:"name"`
+
+	// Value is the exact cookie value. Kept to safe characters, because types
+	// embed it in a regular expression on the Cookie header.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.-]{1,128}$`
+	Value string `json:"value"`
+}
+
+// EndpointQueryParamMatch is a query parameter condition.
+type EndpointQueryParamMatch struct {
+	// Name is the query parameter name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	Name string `json:"name"`
+
+	// Value is the exact expected value.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=1024
+	Value string `json:"value"`
+}
+
+// EndpointRuleBackend is a backend a rule sends traffic to.
+type EndpointRuleBackend struct {
+	// Name is a backend in spec.backendRefs.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Weight is this backend's share of the rule's traffic, relative to the
+	// rule's other backends; 0 sends none.
+	// +optional
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000000
+	Weight *int32 `json:"weight,omitempty"`
+}
+
+// EndpointMirror copies a share of a rule's requests to a backend.
+type EndpointMirror struct {
+	// Backend is a backend in spec.backendRefs, usually one at weight 0.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Backend string `json:"backend"`
+
+	// Percent of the rule's requests to copy.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	Percent int32 `json:"percent"`
 }
 
 // EndpointStatus defines the observed state of Endpoint.
@@ -222,17 +332,16 @@ type LatestEndpointRelease struct {
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Project",type=string,JSONPath=`.spec.owner.projectName`
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type.name`
-// +kubebuilder:printcolumn:name="Path",type=string,JSONPath=`.spec.address.path`
-// +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.spec.address.hostname`,priority=1
+// +kubebuilder:printcolumn:name="Release",type=string,JSONPath=`.status.latestRelease.name`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Endpoint is the Schema for the endpoints API.
-// An Endpoint routes traffic across one or more component endpoints using
-// weights, rendered through an EndpointType or ClusterEndpointType. It is
-// concerned with L7 traffic routing only; the compute side (ports, network
+// An Endpoint routes traffic across one or more backends using weights and
+// rules, rendered through an EndpointType or ClusterEndpointType. It is
+// concerned with traffic routing only; the compute side (ports, network
 // policies) stays on Workload.spec.endpoints.
-// The plural "endpoints" shadows core v1 Endpoints in kubectl; use the
-// fully-qualified "endpoints.openchoreo.dev".
+// The plural "endpoints" and the short name "ep" are taken by core v1 Endpoints
+// in kubectl, so this kind has no short name; use "endpoints.openchoreo.dev".
 type Endpoint struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

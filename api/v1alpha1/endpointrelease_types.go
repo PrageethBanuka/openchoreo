@@ -25,14 +25,11 @@ type EndpointReleaseSpec struct {
 	// +kubebuilder:validation:Required
 	EndpointType EndpointReleaseEndpointType `json:"endpointType"`
 
-	// Address is the URL the Endpoint serves, copied from the Endpoint spec.
-	// Unset for Endpoints of a Service-addressed type.
-	// +optional
-	Address *EndpointAddress `json:"address,omitempty"`
-
-	// TakeOver is the component URL the Endpoint also serves, if any.
-	// +optional
-	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
+	// Visibility is the snapshot of the scopes the Endpoint exposes its
+	// backends to.
+	// +kubebuilder:validation:MinItems=1
+	// +listType=set
+	Visibility []EndpointVisibility `json:"visibility"`
 
 	// BackendRefs holds the snapshot of backend references and weights from the
 	// Endpoint spec at release time.
@@ -40,6 +37,16 @@ type EndpointReleaseSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`
+
+	// Rules holds the snapshot of the Endpoint's routing rules.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Rules []EndpointRule `json:"rules,omitempty"`
+
+	// Schema holds the snapshot of the Endpoint's API definition, if set.
+	// +optional
+	Schema *EndpointSchema `json:"schema,omitempty"`
 
 	// Parameters holds the snapshot of parameter values from the Endpoint spec at
 	// release time. The schema for these values is defined by the EndpointType's

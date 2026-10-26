@@ -15,9 +15,10 @@ import (
 // configuration, not the ownership pointer (mirrors resource.ReleaseSpec).
 type ReleaseSpec struct {
 	EndpointType openchoreov1alpha1.EndpointReleaseEndpointType `json:"endpointType"`
-	Address      *openchoreov1alpha1.EndpointAddress            `json:"address,omitempty"`
-	TakeOver     *openchoreov1alpha1.EndpointTakeOver           `json:"takeOver,omitempty"`
+	Visibility   []openchoreov1alpha1.EndpointVisibility        `json:"visibility"`
 	BackendRefs  []openchoreov1alpha1.EndpointBackendRef        `json:"backendRefs"`
+	Rules        []openchoreov1alpha1.EndpointRule              `json:"rules,omitempty"`
+	Schema       *openchoreov1alpha1.EndpointSchema             `json:"schema,omitempty"`
 	Parameters   *runtime.RawExtension                          `json:"parameters,omitempty"`
 }
 

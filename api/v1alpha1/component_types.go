@@ -161,13 +161,8 @@ type ComponentEndpointRef struct {
 	// Name of the Endpoint.
 	Name string `json:"name"`
 
-	// Endpoint is the workload endpoint of this component the Endpoint routes to
-	// or serves the URL of.
+	// Endpoint is the workload endpoint of this component the Endpoint routes to.
 	Endpoint string `json:"endpoint"`
-
-	// ServesURL is true when the Endpoint serves this workload endpoint's URL.
-	// +optional
-	ServesURL bool `json:"servesURL,omitempty"`
 
 	// Environments lists the weight this component has in the release pinned in
 	// each environment where the Endpoint is bound.

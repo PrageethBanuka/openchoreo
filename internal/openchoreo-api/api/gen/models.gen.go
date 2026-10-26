@@ -188,16 +188,28 @@ const (
 	CreateGitSecretRequestWorkflowPlaneKindWorkflowPlane        CreateGitSecretRequestWorkflowPlaneKind = "WorkflowPlane"
 )
 
+// Defines values for EndpointBackendRefKind.
+const (
+	EndpointBackendRefKindComponent EndpointBackendRefKind = "Component"
+)
+
+// Defines values for EndpointMatchHeadersType.
+const (
+	Exact             EndpointMatchHeadersType = "Exact"
+	RegularExpression EndpointMatchHeadersType = "RegularExpression"
+)
+
 // Defines values for EndpointReleaseSpecEndpointTypeKind.
 const (
 	EndpointReleaseSpecEndpointTypeKindClusterEndpointType EndpointReleaseSpecEndpointTypeKind = "ClusterEndpointType"
 	EndpointReleaseSpecEndpointTypeKindEndpointType        EndpointReleaseSpecEndpointTypeKind = "EndpointType"
 )
 
-// Defines values for EndpointResolvedAddressKind.
+// Defines values for EndpointReleaseSpecVisibility.
 const (
-	Address  EndpointResolvedAddressKind = "Address"
-	TakeOver EndpointResolvedAddressKind = "TakeOver"
+	EndpointReleaseSpecVisibilityExternal  EndpointReleaseSpecVisibility = "external"
+	EndpointReleaseSpecVisibilityInternal  EndpointReleaseSpecVisibility = "internal"
+	EndpointReleaseSpecVisibilityNamespace EndpointReleaseSpecVisibility = "namespace"
 )
 
 // Defines values for EndpointRouteOwnerVisibilities.
@@ -216,10 +228,11 @@ const (
 	EndpointServingClaimVisibilitiesProject   EndpointServingClaimVisibilities = "project"
 )
 
-// Defines values for EndpointSpecReclaimPolicy.
+// Defines values for EndpointSpecVisibility.
 const (
-	EndpointReclaimPolicyDelete EndpointSpecReclaimPolicy = "Delete"
-	EndpointReclaimPolicyRetain EndpointSpecReclaimPolicy = "Retain"
+	EndpointSpecVisibilityExternal  EndpointSpecVisibility = "external"
+	EndpointSpecVisibilityInternal  EndpointSpecVisibility = "internal"
+	EndpointSpecVisibilityNamespace EndpointSpecVisibility = "namespace"
 )
 
 // Defines values for EndpointTypeRefKind.
@@ -234,16 +247,9 @@ const (
 	EndpointTypeResourceTargetPlaneObservabilityplane EndpointTypeResourceTargetPlane = "observabilityplane"
 )
 
-// Defines values for EndpointTypeSpecAddressKind.
-const (
-	Gateway EndpointTypeSpecAddressKind = "Gateway"
-	Service EndpointTypeSpecAddressKind = "Service"
-)
-
 // Defines values for EndpointTypeSpecAllowedBackendKinds.
 const (
 	EndpointTypeSpecAllowedBackendKindsComponent EndpointTypeSpecAllowedBackendKinds = "Component"
-	EndpointTypeSpecAllowedBackendKindsExternal  EndpointTypeSpecAllowedBackendKinds = "External"
 )
 
 // Defines values for EndpointURLStatusType.
@@ -1459,7 +1465,7 @@ type Component struct {
 
 // ComponentEndpointRef An Endpoint that routes to a component's workload endpoint.
 type ComponentEndpointRef struct {
-	// Endpoint Workload endpoint of the component the Endpoint routes to or serves the URL of
+	// Endpoint Workload endpoint of the component the Endpoint routes to
 	Endpoint string `json:"endpoint"`
 
 	// Environments Weight of this component in the release pinned in each environment where the Endpoint is bound
@@ -1470,9 +1476,6 @@ type ComponentEndpointRef struct {
 
 	// Name Endpoint name
 	Name string `json:"name"`
-
-	// ServesURL True when the Endpoint serves this workload endpoint's URL
-	ServesURL *bool `json:"servesURL,omitempty"`
 }
 
 // ComponentList Paginated list of components
@@ -2080,27 +2083,18 @@ type Endpoint struct {
 	// Matches the structure of metav1.ObjectMeta for the fields exposed via the API.
 	Metadata ObjectMeta `json:"metadata"`
 
-	// Spec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed. spec.address is required when the type's addressKind is Gateway and must be unset when it is Service.
+	// Spec Desired state of an Endpoint. spec.owner and spec.type are immutable after creation.
 	Spec   *EndpointSpec   `json:"spec,omitempty"`
 	Status *EndpointStatus `json:"status,omitempty"`
 }
 
-// EndpointAddress The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
-type EndpointAddress struct {
-	// Hostname The Endpoint's own hostname, allowed by its type. Unset means the environment's gateway host.
-	Hostname *string `json:"hostname,omitempty"`
-
-	// Path Path prefix clients call
-	Path string `json:"path"`
-}
-
-// EndpointBackendRef One backend of an Endpoint, a component workload endpoint or an external service, with its relative weight.
+// EndpointBackendRef One backend of an Endpoint, a component workload endpoint, with its relative weight.
 type EndpointBackendRef struct {
 	// Component A workload endpoint of a component in the Endpoint's project.
 	Component *EndpointComponentRef `json:"component,omitempty"`
 
-	// External A service outside OpenChoreo.
-	External *EndpointExternalRef `json:"external,omitempty"`
+	// Kind Kind of backend
+	Kind *EndpointBackendRefKind `json:"kind,omitempty"`
 
 	// Name Identifies the backend within the Endpoint; per-environment overrides refer to it
 	Name string `json:"name"`
@@ -2108,6 +2102,9 @@ type EndpointBackendRef struct {
 	// Weight Share of traffic relative to the sum of all weights (Gateway API semantics). 0 sends no traffic.
 	Weight *int32 `json:"weight,omitempty"`
 }
+
+// EndpointBackendRefKind Kind of backend
+type EndpointBackendRefKind string
 
 // EndpointBackendSlot A component workload endpoint.
 type EndpointBackendSlot struct {
@@ -2125,12 +2122,6 @@ type EndpointComponentRef struct {
 
 	// Name Component name
 	Name string `json:"name"`
-}
-
-// EndpointExternalRef A service outside OpenChoreo.
-type EndpointExternalRef struct {
-	// Url Base URL of the service, http(s)://host[:port]
-	Url string `json:"url"`
 }
 
 // EndpointGatewayURLs Resolved gateway URLs for an endpoint
@@ -2153,6 +2144,26 @@ type EndpointList struct {
 	// for efficient pagination through large result sets.
 	Pagination Pagination `json:"pagination"`
 }
+
+// EndpointMatch Request conditions, all of which must hold
+type EndpointMatch struct {
+	Cookies *[]struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"cookies,omitempty"`
+	Headers *[]struct {
+		Name  string                    `json:"name"`
+		Type  *EndpointMatchHeadersType `json:"type,omitempty"`
+		Value string                    `json:"value"`
+	} `json:"headers,omitempty"`
+	QueryParams *[]struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"queryParams,omitempty"`
+}
+
+// EndpointMatchHeadersType defines model for EndpointMatch.Headers.Type.
+type EndpointMatchHeadersType string
 
 // EndpointRelease EndpointRelease resource.
 // Immutable snapshot of Endpoint.spec and the referenced (Cluster)EndpointType.spec
@@ -2209,11 +2220,9 @@ type EndpointReleaseBindingList struct {
 type EndpointReleaseBindingSpec struct {
 	// BackendOverrides Environment-specific values for the release's backends, matched by name
 	BackendOverrides *[]struct {
-		// External A service outside OpenChoreo.
-		External *EndpointExternalRef `json:"external,omitempty"`
-		Name     string               `json:"name"`
+		Name string `json:"name"`
 
-		// Weight Replaces the release's weight for this backend in this environment
+		// Weight Replaces the release's weight for this backend in this environment, in backendRefs and in rules that split between several backends
 		Weight *int32 `json:"weight,omitempty"`
 	} `json:"backendOverrides,omitempty"`
 
@@ -2226,18 +2235,12 @@ type EndpointReleaseBindingSpec struct {
 	// Environment Target environment name. Immutable after creation.
 	Environment string `json:"environment"`
 
-	// Hostname Overrides the Endpoint's address.hostname in this environment
-	Hostname *string `json:"hostname,omitempty"`
-
 	// Owner Identifies the endpoint and project an EndpointRelease or EndpointReleaseBinding belongs to.
 	Owner EndpointReleaseOwner `json:"owner"`
 }
 
 // EndpointReleaseBindingStatus Observed state of an EndpointReleaseBinding.
 type EndpointReleaseBindingStatus struct {
-	// Addresses Host and path pairs this binding serves in its environment
-	Addresses *[]EndpointResolvedAddress `json:"addresses,omitempty"`
-
 	// Backends Resolution of each backendRef in this binding's environment
 	Backends *[]ResolvedEndpointBackend `json:"backends,omitempty"`
 
@@ -2278,9 +2281,6 @@ type EndpointReleaseOwner struct {
 
 // EndpointReleaseSpec Desired state of an EndpointRelease. Immutable after creation.
 type EndpointReleaseSpec struct {
-	// Address The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
-	Address *EndpointAddress `json:"address,omitempty"`
-
 	// BackendRefs Snapshot of Endpoint.spec.backendRefs at release time.
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`
 
@@ -2302,23 +2302,21 @@ type EndpointReleaseSpec struct {
 	// Parameters Snapshot of parameter values from Endpoint.spec at release time.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
 
-	// TakeOver A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
-	// to the Endpoint without a gap. Can be added or removed, not changed.
-	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
+	// Rules Snapshot of Endpoint.spec.rules at release time.
+	Rules *[]EndpointRule `json:"rules,omitempty"`
+
+	// Schema API definition of the Endpoint
+	Schema *EndpointSchema `json:"schema,omitempty"`
+
+	// Visibility Snapshot of Endpoint.spec.visibility at release time.
+	Visibility *[]EndpointReleaseSpecVisibility `json:"visibility,omitempty"`
 }
 
 // EndpointReleaseSpecEndpointTypeKind Source kind (EndpointType or ClusterEndpointType)
 type EndpointReleaseSpecEndpointTypeKind string
 
-// EndpointResolvedAddress A host and path a binding serves in its environment.
-type EndpointResolvedAddress struct {
-	Host string                      `json:"host"`
-	Kind EndpointResolvedAddressKind `json:"kind"`
-	Path string                      `json:"path"`
-}
-
-// EndpointResolvedAddressKind defines model for EndpointResolvedAddress.Kind.
-type EndpointResolvedAddressKind string
+// EndpointReleaseSpecVisibility defines model for EndpointReleaseSpec.Visibility.
+type EndpointReleaseSpecVisibility string
 
 // EndpointRouteOwner An Endpoint that routes traffic to a workload endpoint.
 type EndpointRouteOwner struct {
@@ -2332,6 +2330,34 @@ type EndpointRouteOwner struct {
 // EndpointRouteOwnerVisibilities defines model for EndpointRouteOwner.Visibilities.
 type EndpointRouteOwnerVisibilities string
 
+// EndpointRule Routes the requests it matches to its backends. Rules are evaluated in order; a rule without
+// matches is the catch-all and must be last. Without one, unmatched requests follow backendRefs.
+type EndpointRule struct {
+	// Backends Backends (by backendRefs name) receiving the rule's requests, with relative weights
+	Backends []struct {
+		Name   string `json:"name"`
+		Weight *int32 `json:"weight,omitempty"`
+	} `json:"backends"`
+
+	// Matches A request matches when any entry matches; every condition of an entry must hold
+	Matches *[]EndpointMatch `json:"matches,omitempty"`
+
+	// Mirrors Copies a share of the rule's requests to a backend; responses are discarded
+	Mirrors *[]struct {
+		Backend string `json:"backend"`
+		Percent int32  `json:"percent"`
+	} `json:"mirrors,omitempty"`
+
+	// Name Identifies the rule
+	Name string `json:"name"`
+}
+
+// EndpointSchema API definition of the Endpoint
+type EndpointSchema struct {
+	Content *string `json:"content,omitempty"`
+	Type    *string `json:"type,omitempty"`
+}
+
 // EndpointServingClaim The routing last confirmed accepted on the data plane. Component ReleaseBindings stop
 // rendering their own gateway routes for the claimed (component, endpoint, visibility) slots.
 type EndpointServingClaim struct {
@@ -2344,23 +2370,23 @@ type EndpointServingClaim struct {
 	// Since When this claim was first established
 	Since time.Time `json:"since"`
 
-	// Urls Component workload endpoints whose URLs the accepted routes take over (the Endpoint's spec.takeOver)
+	// Urls Component workload endpoints the accepted routes serve (the Endpoint's component backends)
 	Urls *[]EndpointBackendSlot `json:"urls,omitempty"`
 
-	// Visibilities Gateway visibilities the accepted routes serve
+	// Visibilities The Endpoint's declared visibilities
 	Visibilities *[]EndpointServingClaimVisibilities `json:"visibilities,omitempty"`
 }
 
 // EndpointServingClaimVisibilities defines model for EndpointServingClaim.Visibilities.
 type EndpointServingClaimVisibilities string
 
-// EndpointSpec Desired state of an Endpoint. spec.owner, spec.type and spec.address are immutable after creation; spec.takeOver can be added or removed but not changed. spec.address is required when the type's addressKind is Gateway and must be unset when it is Service.
+// EndpointSpec Desired state of an Endpoint. spec.owner and spec.type are immutable after creation.
 type EndpointSpec struct {
-	// Address The URL an Endpoint serves. Fixed after creation; it is the Endpoint's identity.
-	Address *EndpointAddress `json:"address,omitempty"`
+	// AutoDeploy Deploy each new release to the first environment of the project's deployment pipeline
+	AutoDeploy *bool `json:"autoDeploy,omitempty"`
 
-	// BackendRefs Component workload endpoints receiving traffic, with relative weights. May be empty; see reclaimPolicy.
-	BackendRefs *[]EndpointBackendRef `json:"backendRefs,omitempty"`
+	// BackendRefs Component workload endpoints receiving traffic, with relative weights.
+	BackendRefs []EndpointBackendRef `json:"backendRefs"`
 
 	// Owner Identifies the project that owns this Endpoint.
 	Owner struct {
@@ -2371,21 +2397,21 @@ type EndpointSpec struct {
 	// Parameters Values for the parameter schema declared on the referenced (Cluster)EndpointType. Validated by the controller.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
 
-	// ReclaimPolicy What happens when the Endpoint has no backends left. Delete removes it and hands its URL back;
-	// Retain keeps it as Orphaned, without routes, until a backend is added.
-	ReclaimPolicy *EndpointSpecReclaimPolicy `json:"reclaimPolicy,omitempty"`
+	// Rules Header, cookie and query routing, in order. Unset routes every request by backendRefs weights.
+	Rules *[]EndpointRule `json:"rules,omitempty"`
 
-	// TakeOver A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
-	// to the Endpoint without a gap. Can be added or removed, not changed.
-	TakeOver *EndpointTakeOver `json:"takeOver,omitempty"`
+	// Schema API definition of the Endpoint
+	Schema *EndpointSchema `json:"schema,omitempty"`
 
 	// Type Reference to an EndpointType or ClusterEndpointType template.
 	Type EndpointTypeRef `json:"type"`
+
+	// Visibility Scopes the Endpoint is reachable from. The EndpointType renders a route for each.
+	Visibility []EndpointSpecVisibility `json:"visibility"`
 }
 
-// EndpointSpecReclaimPolicy What happens when the Endpoint has no backends left. Delete removes it and hands its URL back;
-// Retain keeps it as Orphaned, without routes, until a backend is added.
-type EndpointSpecReclaimPolicy string
+// EndpointSpecVisibility defines model for EndpointSpec.Visibility.
+type EndpointSpecVisibility string
 
 // EndpointStatus Observed state of an Endpoint.
 type EndpointStatus struct {
@@ -2403,13 +2429,6 @@ type EndpointStatus struct {
 
 	// ObservedGeneration Most recent generation observed by the controller
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
-}
-
-// EndpointTakeOver A component workload endpoint whose existing URL the Endpoint also serves, so its clients move
-// to the Endpoint without a gap. Can be added or removed, not changed.
-type EndpointTakeOver struct {
-	// Component A workload endpoint of a component in the Endpoint's project.
-	Component EndpointComponentRef `json:"component"`
 }
 
 // EndpointType EndpointType resource.
@@ -2483,13 +2502,10 @@ type EndpointTypeResourceTargetPlane string
 
 // EndpointTypeSpec Desired state of a (Cluster)EndpointType.
 type EndpointTypeSpec struct {
-	// AddressKind Kind of address Endpoints of this type serve. Gateway serves the Endpoint's own host and path on a gateway; Service serves the taken-over component's in-cluster Service (for example a service mesh route).
-	AddressKind *EndpointTypeSpecAddressKind `json:"addressKind,omitempty"`
-
-	// AllowedBackendKinds Backend kinds Endpoints of this type may use. External must be allowed explicitly.
+	// AllowedBackendKinds Backend kinds Endpoints of this type may use. Empty allows Component.
 	AllowedBackendKinds *[]EndpointTypeSpecAllowedBackendKinds `json:"allowedBackendKinds,omitempty"`
 
-	// AllowedHostnames Hostnames Endpoints of this type may use as their own; a leading "*." matches one label. Empty means the environment's gateway host only.
+	// AllowedHostnames Hostnames Endpoints of this type may ask for in a top-level "hostname" parameter; a leading "*." matches one label. Empty means the environment's gateway host only.
 	AllowedHostnames *[]string `json:"allowedHostnames,omitempty"`
 
 	// EnvironmentConfigs Schema section using openAPIV3Schema format
@@ -2504,9 +2520,6 @@ type EndpointTypeSpec struct {
 	// Validations CEL-based validation rules evaluated before rendering
 	Validations *[]ValidationRule `json:"validations,omitempty"`
 }
-
-// EndpointTypeSpecAddressKind Kind of address Endpoints of this type serve. Gateway serves the Endpoint's own host and path on a gateway; Service serves the taken-over component's in-cluster Service (for example a service mesh route).
-type EndpointTypeSpecAddressKind string
 
 // EndpointTypeSpecAllowedBackendKinds defines model for EndpointTypeSpec.AllowedBackendKinds.
 type EndpointTypeSpecAllowedBackendKinds string
@@ -3820,9 +3833,6 @@ type ResolvedEndpointBackend struct {
 	// Endpoint Workload endpoint name on the backend component
 	Endpoint *string `json:"endpoint,omitempty"`
 
-	// ExternalURL URL used in this environment, for an external backend
-	ExternalURL *string `json:"externalURL,omitempty"`
-
 	// Name Backend name in the release
 	Name string `json:"name"`
 
@@ -5071,13 +5081,6 @@ type WorkloadEndpoint struct {
 
 	// DisplayName Human-readable name for the endpoint
 	DisplayName *string `json:"displayName,omitempty"`
-
-	// EndpointName Name of the Endpoint that serves this endpoint when endpointType is set.
-	// Defaults to <component>-<endpoint>. The Endpoint is created if missing and is not owned by the component.
-	EndpointName *string `json:"endpointName,omitempty"`
-
-	// EndpointType Reference to an EndpointType or ClusterEndpointType template.
-	EndpointType *EndpointTypeRef `json:"endpointType,omitempty"`
 
 	// Port Port exposed by the endpoint
 	Port int `json:"port"`

@@ -150,21 +150,6 @@ type WorkloadEndpoint struct {
 	// Schema for the endpoint API definition.
 	// +optional
 	Schema *Schema `json:"schema,omitempty"`
-
-	// EndpointType serves this endpoint through an Endpoint of the given type.
-	// When set, the Component controller creates the Endpoint if it is missing,
-	// with this component as its only backend. The Endpoint is not owned by the
-	// component: it has its own lifecycle. When unset, the endpoint keeps the
-	// route its ComponentType renders.
-	// +optional
-	EndpointType *EndpointTypeRef `json:"endpointType,omitempty"`
-
-	// EndpointName is the name of the Endpoint that serves this endpoint.
-	// Defaults to <component>-<endpoint>. Only used when endpointType is set.
-	// +optional
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	EndpointName string `json:"endpointName,omitempty"`
 }
 
 // Schema defines the API definition for an endpoint.

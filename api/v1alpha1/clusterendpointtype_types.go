@@ -26,35 +26,26 @@ type ClusterEndpointTypeSpec struct {
 	// +optional
 	Validations []ValidationRule `json:"validations,omitempty"`
 
-	// AllowedHostnames lists the hostnames Endpoints of this type may use as
-	// their own hostname. A leading "*." matches any one label, for example
+	// AllowedHostnames lists the hostnames Endpoints of this type may set in a
+	// hostname parameter. A leading "*." matches any one label, for example
 	// "*.example.com". Empty means Endpoints use the environment's gateway host.
 	// +optional
 	AllowedHostnames []string `json:"allowedHostnames,omitempty"`
 
 	// AllowedBackendKinds lists the backend kinds Endpoints of this type may use.
-	// External backends send traffic outside the cluster, so they must be
-	// allowed explicitly.
 	// +optional
 	// +kubebuilder:default={Component}
 	AllowedBackendKinds []EndpointBackendKind `json:"allowedBackendKinds,omitempty"`
 
-	// AddressKind is the kind of address Endpoints of this type serve. Gateway
-	// types serve the Endpoint's own address, a host and path on a gateway.
-	// Service types serve the in-cluster Service of the component the Endpoint
-	// takes over, so callers inside the cluster keep their URL (for example a
-	// service mesh route); their Endpoints set takeOver and no address.
-	// +optional
-	// +kubebuilder:default=Gateway
-	AddressKind EndpointAddressKind `json:"addressKind,omitempty"`
-
 	// Resources are the routing manifests (e.g. HTTPRoute, Ingress,
 	// CiliumEnvoyConfig) the ClusterEndpointType emits on the data plane for each
 	// EndpointReleaseBinding. Uses the same templating engine as ComponentType.
-	// At render time the CEL context exposes metadata.*, parameters.*,
-	// environmentConfigs.*, and backends[], where each backend carries
-	// componentName, endpoint, serviceName, port, weight, and serviceURL
-	// resolved for the binding's environment.
+	// At render time the CEL context exposes metadata, parameters,
+	// environmentConfigs, visibility[], rules[] (with each backend resolved),
+	// dataplane, environment, gateway, and backends[]. Each backend carries
+	// name, componentName, endpoint, protocol, weight (after the binding's
+	// overrides), podSelector and targetPort (to render its Service), and
+	// serviceName, port and serviceURL (the Service the Endpoint renders for it).
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=id

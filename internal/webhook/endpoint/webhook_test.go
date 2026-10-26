@@ -19,31 +19,28 @@ import (
 	openchoreodevv1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 )
 
-const typeName = "http-weighted"
+const typeName = "http"
 
-// endpoint builds an Endpoint at address path in namespace default, with the
-// given component backends at weight 100.
-func endpoint(name, project, path string, backends ...string) *openchoreodevv1alpha1.Endpoint {
+var (
+	ext      = openchoreodevv1alpha1.EndpointVisibilityExternal
+	internal = openchoreodevv1alpha1.EndpointVisibilityInternal
+)
+
+// endpoint builds an Endpoint in namespace default with one visibility and
+// the given component backends at weight 100.
+func endpoint(name, project string, visibility openchoreodevv1alpha1.EndpointVisibility, backends ...string) *openchoreodevv1alpha1.Endpoint {
 	ep := &openchoreodevv1alpha1.Endpoint{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 		Spec: openchoreodevv1alpha1.EndpointSpec{
-			Owner:   openchoreodevv1alpha1.EndpointOwner{ProjectName: project},
-			Type:    openchoreodevv1alpha1.EndpointTypeRef{Kind: openchoreodevv1alpha1.EndpointTypeRefKindClusterEndpointType, Name: typeName},
-			Address: &openchoreodevv1alpha1.EndpointAddress{Path: path},
+			Owner:      openchoreodevv1alpha1.EndpointOwner{ProjectName: project},
+			Type:       openchoreodevv1alpha1.EndpointTypeRef{Kind: openchoreodevv1alpha1.EndpointTypeRefKindClusterEndpointType, Name: typeName},
+			Visibility: []openchoreodevv1alpha1.EndpointVisibility{visibility},
 		},
 	}
 	for _, c := range backends {
 		ep.Spec.BackendRefs = append(ep.Spec.BackendRefs, openchoreodevv1alpha1.EndpointBackendRef{
 			Name: c, Component: &openchoreodevv1alpha1.EndpointComponentRef{Name: c, Endpoint: "http"}, Weight: ptr.To[int32](100),
 		})
-	}
-	return ep
-}
-
-// takingOver makes ep take over payments-v1's http URL.
-func takingOver(ep *openchoreodevv1alpha1.Endpoint) *openchoreodevv1alpha1.Endpoint {
-	ep.Spec.TakeOver = &openchoreodevv1alpha1.EndpointTakeOver{
-		Component: openchoreodevv1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"},
 	}
 	return ep
 }
@@ -55,24 +52,6 @@ func clusterType(hostnames []string, kinds ...openchoreodevv1alpha1.EndpointBack
 			AllowedHostnames:    hostnames,
 			AllowedBackendKinds: kinds,
 		},
-	}
-}
-
-// componentRoute is a component ReleaseBinding whose http endpoint is served
-// at path on the environment host.
-func componentRoute(component, path string) *openchoreodevv1alpha1.ReleaseBinding {
-	return &openchoreodevv1alpha1.ReleaseBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: component + "-development", Namespace: "default"},
-		Spec: openchoreodevv1alpha1.ReleaseBindingSpec{
-			Owner:       openchoreodevv1alpha1.ReleaseBindingOwner{ProjectName: "shop", ComponentName: component},
-			Environment: "development",
-		},
-		Status: openchoreodevv1alpha1.ReleaseBindingStatus{Endpoints: []openchoreodevv1alpha1.EndpointURLStatus{{
-			Name: "http",
-			ExternalURLs: &openchoreodevv1alpha1.EndpointGatewayURLs{
-				HTTP: &openchoreodevv1alpha1.EndpointURL{Host: "development-default.openchoreoapis.localhost", Path: path},
-			},
-		}}},
 	}
 }
 
@@ -90,35 +69,28 @@ func refused(t *testing.T, err error, contains string) {
 	assert.Contains(t, err.Error(), contains)
 }
 
-func TestValidateAddress(t *testing.T) {
-	existing := endpoint("payments-api", "shop", "/payments", "payments-v1")
-	otherNS := endpoint("billing-api", "billing", "/billing", "billing-v1")
+func TestValidateSlots(t *testing.T) {
+	existing := endpoint("trips-api", "rides", ext, "trips-python", "trips-go")
+	otherNS := endpoint("trips-api", "rides", ext, "trips-python")
 	otherNS.Namespace = "finance"
-	ownHost := endpoint("partner-api", "shop", "/partners", "payments-v1")
-	ownHost.Spec.Address.Hostname = "api.example.com"
-	ownHost.Namespace = "finance"
 
 	tests := []struct {
 		name     string
 		ep       *openchoreodevv1alpha1.Endpoint
 		contains string // empty means admitted
 	}{
-		{"same path on the environment host in the namespace (case 1, 2)",
-			endpoint("payments-canary", "other-project", "/payments", "payments-v2"), `already served by Endpoint default/payments-api`},
-		{"same path in another namespace's environment host",
-			endpoint("billing-copy", "shop", "/billing", "payments-v1"), ""},
-		{"same own hostname and path in another namespace (case 3)",
-			func() *openchoreodevv1alpha1.Endpoint {
-				ep := endpoint("partner-copy", "shop", "/partners", "payments-v1")
-				ep.Spec.Address.Hostname = "api.example.com"
-				return ep
-			}(), `already served by Endpoint finance/partner-api`},
-		{"different path sharing a backend",
-			endpoint("payments-partner", "shop", "/payments-partner", "payments-v1"), ""},
+		{"same component in the same visibility",
+			endpoint("trips-canary", "rides", ext, "trips-go"), `Endpoint "trips-api" already routes trips-go/http with external visibility`},
+		{"same component in another visibility",
+			endpoint("trips-partners", "rides", internal, "trips-python"), ""},
+		{"same component name in another project",
+			endpoint("trips-copy", "billing", ext, "trips-python"), ""},
+		{"another component",
+			endpoint("checkout", "rides", ext, "checkout-blue"), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := validator(t, clusterType([]string{"*.example.com"}), existing, otherNS, ownHost)
+			v := validator(t, clusterType(nil), existing, otherNS)
 			_, err := v.ValidateCreate(context.Background(), tt.ep)
 			if tt.contains == "" {
 				require.NoError(t, err)
@@ -129,74 +101,55 @@ func TestValidateAddress(t *testing.T) {
 	}
 }
 
-func TestValidateComponentPath(t *testing.T) {
-	v := validator(t, clusterType(nil), componentRoute("payments-v1", "/payments-v1-http"))
-
-	_, err := v.ValidateCreate(context.Background(), endpoint("payments-api", "shop", "/payments-v1-http", "payments-v1"))
-	refused(t, err, "take it over (spec.takeOver)")
-
-	_, err = v.ValidateCreate(context.Background(),
-		takingOver(endpoint("payments-api", "shop", "/payments-v1-http", "payments-v1")))
-	require.NoError(t, err, "taking the route over is how its URL moves to the Endpoint (case 5)")
-}
-
-func TestValidateTakeOver(t *testing.T) {
-	holder := takingOver(endpoint("payments-api", "shop", "/payments", "payments-v1"))
-	v := validator(t, clusterType(nil), holder)
-
-	_, err := v.ValidateCreate(context.Background(),
-		takingOver(endpoint("payments-next", "shop", "/payments-next", "payments-v1")))
-	refused(t, err, `already taken over by Endpoint "payments-api"`)
-}
-
 func TestValidateTypeLimits(t *testing.T) {
-	external := func() *openchoreodevv1alpha1.Endpoint {
-		ep := endpoint("orders-api", "shop", "/orders", "orders-v1")
-		ep.Spec.BackendRefs = append(ep.Spec.BackendRefs, openchoreodevv1alpha1.EndpointBackendRef{
-			Name: "legacy", External: &openchoreodevv1alpha1.EndpointExternalRef{URL: "https://legacy.example.com"}, Weight: ptr.To[int32](10),
-		})
+	withHost := func(host string) *openchoreodevv1alpha1.Endpoint {
+		ep := endpoint("orders-api", "shop", ext, "orders-v1")
+		ep.Spec.Parameters = &runtime.RawExtension{Raw: []byte(`{"hostname":"` + host + `"}`)}
 		return ep
 	}
-
-	_, err := validator(t, clusterType(nil)).ValidateCreate(context.Background(), external())
-	refused(t, err, "does not allow External backends")
-
-	_, err = validator(t, clusterType(nil, openchoreodevv1alpha1.EndpointBackendKindComponent,
-		openchoreodevv1alpha1.EndpointBackendKindExternal)).ValidateCreate(context.Background(), external())
-	require.NoError(t, err)
-
-	withHost := endpoint("orders-api", "shop", "/orders", "orders-v1")
-	withHost.Spec.Address.Hostname = "orders.other.org"
-	_, err = validator(t, clusterType([]string{"*.example.com"})).ValidateCreate(context.Background(), withHost)
+	_, err := validator(t, clusterType([]string{"*.example.com"})).ValidateCreate(context.Background(), withHost("orders.other.org"))
 	refused(t, err, "allowed: *.example.com")
 
-	_, err = validator(t, clusterType(nil)).ValidateCreate(context.Background(), withHost)
+	_, err = validator(t, clusterType(nil)).ValidateCreate(context.Background(), withHost("orders.example.com"))
 	refused(t, err, "leave hostname empty")
+
+	_, err = validator(t, clusterType([]string{"*.example.com"})).ValidateCreate(context.Background(), withHost("orders.example.com"))
+	require.NoError(t, err)
+
+	_, err = validator(t, clusterType(nil, openchoreodevv1alpha1.EndpointBackendKindComponent)).
+		ValidateCreate(context.Background(), endpoint("orders-api", "shop", ext, "orders-v1"))
+	require.NoError(t, err)
 }
 
 func TestValidateWeights(t *testing.T) {
-	ep := endpoint("orders-api", "shop", "/orders", "orders-v1")
+	ep := endpoint("orders-api", "shop", ext, "orders-v1")
 	ep.Spec.BackendRefs[0].Weight = ptr.To[int32](0)
 	_, err := validator(t, clusterType(nil)).ValidateCreate(context.Background(), ep)
 	refused(t, err, "every backend has weight 0")
+
+	ep.Spec.Rules = []openchoreodevv1alpha1.EndpointRule{{
+		Name: "everyone", Backends: []openchoreodevv1alpha1.EndpointRuleBackend{{Name: "orders-v1"}},
+	}}
+	_, err = validator(t, clusterType(nil)).ValidateCreate(context.Background(), ep)
+	require.NoError(t, err, "a catch-all rule carries its own weights")
 }
 
 func TestValidateIgnoresDeletingEndpoints(t *testing.T) {
-	deleting := endpoint("payments-api", "shop", "/payments", "payments-v1")
+	deleting := endpoint("payments-api", "shop", ext, "payments-v1")
 	now := metav1.Now()
 	deleting.DeletionTimestamp = &now
 	deleting.Finalizers = []string{"keep"}
 	v := validator(t, clusterType(nil), deleting)
 
-	_, err := v.ValidateCreate(context.Background(), endpoint("payments-next", "shop", "/payments", "payments-v1"))
+	_, err := v.ValidateCreate(context.Background(), endpoint("payments-next", "shop", ext, "payments-v1"))
 	require.NoError(t, err)
 }
 
 func TestValidateUpdateChecksOnlyChangedClaims(t *testing.T) {
-	holder := endpoint("payments-api", "shop", "/payments", "payments-v1")
+	holder := endpoint("payments-api", "shop", ext, "payments-v1")
 	// An Endpoint that got past the webhook (held back by the controller) can
 	// still be updated, for example to add its finalizer.
-	heldBack := endpoint("payments-canary", "shop", "/payments", "payments-v1")
+	heldBack := endpoint("payments-canary", "shop", ext, "payments-v1")
 	v := validator(t, clusterType(nil), holder)
 
 	updated := heldBack.DeepCopy()
@@ -204,37 +157,11 @@ func TestValidateUpdateChecksOnlyChangedClaims(t *testing.T) {
 	_, err := v.ValidateUpdate(context.Background(), heldBack, updated)
 	require.NoError(t, err)
 
-	added := endpoint("payments-other", "shop", "/payments-other", "payments-v1")
-	withTakeOver := takingOver(added.DeepCopy())
-	holderTakeOver := takingOver(endpoint("payments-old", "shop", "/payments-old", "payments-v1"))
-	v = validator(t, clusterType(nil), holderTakeOver)
-	_, err = v.ValidateUpdate(context.Background(), added, withTakeOver)
-	refused(t, err, "already taken over")
-}
-
-func TestValidateAddressKind(t *testing.T) {
-	serviceType := clusterType(nil)
-	serviceType.Spec.AddressKind = openchoreodevv1alpha1.EndpointAddressKindService
-	meshEndpoint := func() *openchoreodevv1alpha1.Endpoint {
-		ep := takingOver(endpoint("orders-mesh", "shop", "", "payments-v1", "payments-v2"))
-		ep.Spec.Address = nil
-		return ep
-	}
-
-	_, err := validator(t, serviceType).ValidateCreate(context.Background(), meshEndpoint())
-	require.NoError(t, err, "a Service type serves the taken-over Service")
-
-	withAddress := takingOver(endpoint("orders-mesh", "shop", "/orders", "payments-v1"))
-	_, err = validator(t, serviceType).ValidateCreate(context.Background(), withAddress)
-	refused(t, err, "remove spec.address")
-
-	noTakeOver := meshEndpoint()
-	noTakeOver.Spec.TakeOver = nil
-	_, err = validator(t, serviceType).ValidateCreate(context.Background(), noTakeOver)
-	refused(t, err, "set spec.takeOver")
-
-	_, err = validator(t, clusterType(nil)).ValidateCreate(context.Background(), meshEndpoint())
-	refused(t, err, "set spec.address.path")
+	partners := endpoint("payments-partners", "shop", internal, "payments-v1")
+	widened := partners.DeepCopy()
+	widened.Spec.Visibility = append(widened.Spec.Visibility, ext)
+	_, err = v.ValidateUpdate(context.Background(), partners, widened)
+	refused(t, err, `Endpoint "payments-api" already routes payments-v1/http`)
 }
 
 func TestValidateParameters(t *testing.T) {
@@ -248,7 +175,7 @@ func TestValidateParameters(t *testing.T) {
 		"additionalProperties": false
 	}`)}}
 	withParams := func(raw string) *openchoreodevv1alpha1.Endpoint {
-		ep := endpoint("orders-api", "shop", "/orders", "orders-v1")
+		ep := endpoint("orders-api", "shop", ext, "orders-v1")
 		ep.Spec.Parameters = &runtime.RawExtension{Raw: []byte(raw)}
 		return ep
 	}

@@ -47,9 +47,9 @@ var BuildDataPlaneContext = projectpipeline.BuildDataPlaneContext
 var BuildEnvironmentContext = projectpipeline.BuildEnvironmentContext
 
 // RenderInput carries everything Render needs. The binding controller
-// rehydrates EndpointTypeSpec, BackendRefs-derived Backends and Parameters
-// from the immutable EndpointRelease snapshot and supplies EnvironmentConfigs
-// from the binding.
+// rehydrates EndpointTypeSpec, BackendRefs-derived Backends, Rules and
+// Parameters from the immutable EndpointRelease snapshot and supplies
+// EnvironmentConfigs from the binding.
 type RenderInput struct {
 	// EndpointTypeSpec is the inlined (Cluster)EndpointType spec snapshot from
 	// the EndpointRelease. Required.
@@ -63,18 +63,19 @@ type RenderInput struct {
 	// exposed to CEL as ${environmentConfigs.*} with schema defaults applied.
 	EnvironmentConfigs *runtime.RawExtension
 
+	// Visibility is the Endpoint's declared spec.visibility, exposed to CEL as
+	// ${visibility}: the gateway scopes to render routes for.
+	Visibility []string
+
 	// Backends are the resolved traffic backends for this environment, exposed
 	// to CEL as ${backends}. Required to be non-empty.
 	Backends []Backend
 
-	// Address is the Endpoint's own address in this environment, exposed to
-	// CEL as ${address}. Required.
-	Address AddressContext
-
-	// TakeOver is the component URL the Endpoint also serves, exposed to CEL
-	// as ${takeOver}. Nil when the Endpoint takes nothing over, or when the
-	// component is not deployed in this environment.
-	TakeOver *URLContext
+	// Rules are the Endpoint's rules with their backends resolved, exposed to
+	// CEL as ${rules}. The list always ends with a catch-all rule: the
+	// Endpoint's own, or the default split of Backends when it has none, so a
+	// template renders one route rule per entry. Required to be non-empty.
+	Rules []Rule
 
 	// Metadata is the controller-computed metadata surface exposed to CEL as
 	// ${metadata.*}.
@@ -89,38 +90,45 @@ type RenderInput struct {
 }
 
 // Backend is one resolved traffic backend: a workload endpoint of a component
-// deployed in the binding's environment, or an external service.
+// deployed in the binding's environment, and the Service the Endpoint renders
+// for it.
 type Backend struct {
 	// Name identifies the backend within the Endpoint.
 	Name string `json:"name"`
 
-	// Kind is Component or External.
+	// Kind is the backend kind (Component).
 	Kind string `json:"kind"`
 
-	// ComponentName is the backend Component, for a component backend.
+	// ComponentName is the backend Component.
 	ComponentName string `json:"componentName,omitempty"`
 
-	// Endpoint is the workload endpoint name on the Component, for a component
-	// backend.
+	// Endpoint is the workload endpoint name on the Component.
 	Endpoint string `json:"endpoint,omitempty"`
-
-	// External is the service an external backend calls in this environment.
-	External *ExternalBackend `json:"external,omitempty"`
 
 	// Protocol is the workload endpoint protocol (HTTP, gRPC, ...).
 	Protocol string `json:"protocol"`
 
-	// ServiceName and Namespace locate the backend's Kubernetes Service on the
-	// data plane. HTTPRoute backendRefs use {name: serviceName, port: port}.
+	// PodSelector selects the backend's pods in this environment: the labels
+	// the component's workload carries. Templates use it to render the
+	// backend's Service.
+	PodSelector map[string]string `json:"podSelector"`
+
+	// TargetPort is the container port of the workload endpoint.
+	TargetPort int32 `json:"targetPort"`
+
+	// ServiceName and Namespace name the Service the Endpoint renders for this
+	// backend on the data plane, and Port is its port. Routes use
+	// {name: serviceName, port: port}.
 	ServiceName string `json:"serviceName"`
 	Namespace   string `json:"namespace"`
 	Port        int32  `json:"port"`
 
-	// Weight is the relative traffic weight from the Endpoint's backendRef.
+	// Weight is the backend's relative weight in this environment: the
+	// Endpoint's, or the binding's override.
 	Weight int32 `json:"weight"`
 
-	// ServiceURL is the in-cluster URL of the backend, e.g.
-	// http://payments-v1.dp-default-shop-dev.svc.cluster.local:8080.
+	// ServiceURL is the in-cluster URL of the backend's Service, e.g.
+	// http://trips-api-go-1a2b3c4d.dp-default-rides-dev.svc.cluster.local:8080.
 	ServiceURL string `json:"serviceURL"`
 
 	// BasePath is the workload endpoint's base path on the backend ("/" when
@@ -128,61 +136,60 @@ type Backend struct {
 	BasePath string `json:"basePath"`
 
 	// ComponentURLs are the addresses the backend component serves today
-	// through its own ComponentType routes. When the Endpoint owns this
-	// endpoint, those routes are not rendered, so an EndpointType serves these
-	// addresses itself to keep clients of the old URLs working.
+	// through its own ComponentType routes. When the Endpoint claims this
+	// endpoint, those routes are not rendered, so an EndpointType may serve
+	// these addresses itself to keep clients of the old URLs working.
 	ComponentURLs ComponentURLs `json:"componentURLs"`
 }
 
-// AddressContext is the Endpoint's own address in one environment.
-type AddressContext struct {
-	// Host is the hostname clients call: the Endpoint's own hostname, or the
-	// environment's external gateway host.
-	Host string `json:"host"`
+// Rule is one of the Endpoint's rules with its backends resolved.
+type Rule struct {
+	// Name identifies the rule.
+	Name string `json:"name"`
 
-	// Path is the path prefix clients call.
-	Path string `json:"path"`
+	// Matches select the requests the rule applies to; empty for the catch-all.
+	Matches []Match `json:"matches"`
 
-	// OwnHostname is true when Host is the Endpoint's own hostname rather than
-	// the environment's gateway host.
-	OwnHostname bool `json:"ownHostname"`
+	// Backends are the rule's backends, each with the rule's weight for it
+	// (after the binding's overrides). Backends at weight 0 are kept, so a
+	// template can filter them.
+	Backends []Backend `json:"backends"`
+
+	// Mirrors copy a share of the rule's requests to a backend.
+	Mirrors []Mirror `json:"mirrors"`
 }
 
-// URLContext is a component URL an Endpoint takes over: the address that
-// component serves today for that workload endpoint, per visibility. A
-// visibility the component does not expose is omitted.
-type URLContext struct {
-	// ComponentName and Endpoint name the workload endpoint whose URL is served.
-	ComponentName string `json:"componentName"`
-	Endpoint      string `json:"endpoint"`
-
-	// BasePath is that workload endpoint's base path ("/" when unset).
-	// Templates rewrite the served path prefix to it.
-	BasePath string `json:"basePath"`
-
-	// ServiceName, Namespace and Port locate the component's in-cluster
-	// Service for that workload endpoint, and ServiceURL is its full URL: the
-	// address in-cluster callers already use. Service-addressed (mesh) types
-	// key their routes on it.
-	ServiceName string `json:"serviceName,omitempty"`
-	Namespace   string `json:"namespace,omitempty"`
-	Port        int32  `json:"port,omitempty"`
-	ServiceURL  string `json:"serviceURL,omitempty"`
-
-	External *Address `json:"external,omitempty"`
-	Internal *Address `json:"internal,omitempty"`
+// Match is one set of conditions a request must all meet. Lists are never
+// nil, so templates can use them without has().
+type Match struct {
+	Headers     []HeaderMatch     `json:"headers"`
+	Cookies     []CookieMatch     `json:"cookies"`
+	QueryParams []QueryParamMatch `json:"queryParams"`
 }
 
-// ExternalBackend is where an external backend sends traffic.
-type ExternalBackend struct {
-	// Scheme is http or https.
-	Scheme string `json:"scheme"`
-	// Host is the service's hostname; templates also send it as the Host header.
-	Host string `json:"host"`
-	// Port is the service's port, defaulted from the scheme.
-	Port int32 `json:"port"`
-	// URL is the full URL as configured.
-	URL string `json:"url"`
+// HeaderMatch is a header condition; Type is Exact or RegularExpression.
+type HeaderMatch struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+// CookieMatch is an exact cookie condition.
+type CookieMatch struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// QueryParamMatch is an exact query parameter condition.
+type QueryParamMatch struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// Mirror copies Percent of a rule's requests to Backend.
+type Mirror struct {
+	Backend Backend `json:"backend"`
+	Percent int32   `json:"percent"`
 }
 
 // ComponentURLs are a backend component's own gateway addresses, per
@@ -247,9 +254,9 @@ type BaseContext struct {
 	Metadata           MetadataContext    `json:"metadata"`
 	Parameters         map[string]any     `json:"parameters"`
 	EnvironmentConfigs map[string]any     `json:"environmentConfigs"`
+	Visibility         []string           `json:"visibility"`
 	Backends           []Backend          `json:"backends"`
-	Address            AddressContext     `json:"address"`
-	TakeOver           *URLContext        `json:"takeOver"`
+	Rules              []Rule             `json:"rules"`
 	DataPlane          DataPlaneContext   `json:"dataplane"`
 	Environment        EnvironmentContext `json:"environment"`
 	// Gateway is the effective gateway exposed at the top level for terseness;

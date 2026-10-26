@@ -94,7 +94,7 @@ func TestComponentEndpointUsage(t *testing.T) {
 	}, RoutedEndpointUsage(usages))
 
 	// The only backend of a release doesn't block deletion: there is nowhere to
-	// move its traffic, and the Endpoint's reclaimPolicy takes over.
+	// move its traffic, and the Endpoint is deleted with it.
 	assert.Empty(t, RoutedEndpointUsage([]EndpointUsage{
 		{Endpoint: "solo", WorkloadEndpoint: "http", Environment: "production", Weight: 100},
 	}))
@@ -115,30 +115,43 @@ func TestComponentEndpointUsageNone(t *testing.T) {
 	assert.Empty(t, RoutedEndpointUsage(usages))
 }
 
-func TestComponentEndpointUsageServedURL(t *testing.T) {
-	c := usageFixture(t)
-	ep := &openchoreov1alpha1.Endpoint{}
-	require.NoError(t, c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "payments-api"}, ep))
-	ep.Spec.TakeOver = &openchoreov1alpha1.EndpointTakeOver{Component: openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}}
-	require.NoError(t, c.Update(context.Background(), ep))
-
-	usages, err := ComponentEndpointUsage(context.Background(), c, "default", "shop", "payments-v1")
-	require.NoError(t, err)
-
-	// At weight 0 in development payments-v1 still serves the URL the other
-	// backend's traffic comes in on, so deleting it would take that URL down.
-	routed := RoutedEndpointUsage(usages)
-	assert.Equal(t, []EndpointUsage{
-		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "development", Weight: 0, OtherBackends: 1, ServesURL: true},
-		{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90, OtherBackends: 1, ServesURL: true},
-	}, routed)
+func TestStillRoutedReason(t *testing.T) {
 	assert.Equal(t,
-		"receives traffic through payments-api in production (weight 90); "+
-			"has its URL served by payments-api in development, payments-api in production; "+
-			"move its weight to 0 and roll out, and delete the Endpoint serving its URL before deleting",
-		StillRoutedReason(routed))
+		"receives traffic through payments-api in production (weight 90); move its weight to 0 and roll out before deleting",
+		StillRoutedReason([]EndpointUsage{{Endpoint: "payments-api", WorkloadEndpoint: "http", Environment: "production", Weight: 90, OtherBackends: 1}}))
+}
 
-	refs := ComponentEndpointRefs(usages)
-	require.NotEmpty(t, refs)
-	assert.True(t, refs[0].ServesURL)
+func TestSharedEndpointSlot(t *testing.T) {
+	ep := func(name, project string, vis []openchoreov1alpha1.EndpointVisibility, components ...string) *openchoreov1alpha1.Endpoint {
+		e := &openchoreov1alpha1.Endpoint{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: openchoreov1alpha1.EndpointSpec{
+				Owner:      openchoreov1alpha1.EndpointOwner{ProjectName: project},
+				Visibility: vis,
+			},
+		}
+		for _, c := range components {
+			e.Spec.BackendRefs = append(e.Spec.BackendRefs, openchoreov1alpha1.EndpointBackendRef{
+				Name: c, Component: &openchoreov1alpha1.EndpointComponentRef{Name: c, Endpoint: "http"},
+			})
+		}
+		return e
+	}
+	ext := []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal}
+	internal := []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityInternal}
+
+	a := ep("trips-api", "rides", ext, "trips-python", "trips-go")
+
+	slot, ok := SharedEndpointSlot(a, ep("other", "rides", ext, "trips-go"))
+	assert.True(t, ok)
+	assert.Equal(t, EndpointSlot{Component: "trips-go", Endpoint: "http", Visibility: openchoreov1alpha1.EndpointVisibilityExternal}, slot)
+
+	_, ok = SharedEndpointSlot(a, ep("partners", "rides", internal, "trips-python"))
+	assert.False(t, ok, "the same component in another visibility is a different slot")
+
+	_, ok = SharedEndpointSlot(a, ep("other", "billing", ext, "trips-go"))
+	assert.False(t, ok, "Endpoints of different projects don't share slots")
+
+	assert.True(t, ClaimsComponentEndpoint(a, "trips-go", "http"))
+	assert.False(t, ClaimsComponentEndpoint(a, "trips-go", "grpc"))
 }

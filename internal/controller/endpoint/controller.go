@@ -10,7 +10,6 @@ import (
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,8 +35,10 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointtypes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=clusterendpointtypes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleases,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleasebindings,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleasebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=components,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=projects,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=deploymentpipelines,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -63,10 +64,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	// With no backends left and reclaimPolicy Delete, the Endpoint is deleted.
-	// Its finalizer releases the claims, which hands the URL back.
-	if len(ep.Spec.BackendRefs) == 0 && ep.Spec.ReclaimPolicy != openchoreov1alpha1.EndpointReclaimPolicyRetain {
-		logger.Info("Endpoint has no backends left; deleting it (reclaimPolicy Delete)")
+	// An Endpoint with no backends left (its last backend component was
+	// deleted) is deleted too. Its finalizer releases the claims, which hands
+	// the route slots back.
+	if len(ep.Spec.BackendRefs) == 0 {
+		logger.Info("Endpoint has no backends left; deleting it")
 		if err := r.Delete(ctx, ep); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("delete Endpoint with no backends: %w", err)
 		}
@@ -92,15 +94,10 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 		}
 	}()
 
-	if len(ep.Spec.BackendRefs) == 0 {
-		return ctrl.Result{}, r.keepOrphaned(ctx, ep)
-	}
-	meta.RemoveStatusCondition(&ep.Status.Conditions, string(ConditionOrphaned))
-
-	// One address, one Endpoint; one take-over per component URL. The webhook
-	// refuses a second claim; this holds the line when it is bypassed or two
-	// creates race, so a newer Endpoint never silently shadows the route of
-	// the one already serving.
+	// One route per (component, endpoint, visibility) slot. The webhook refuses
+	// a second claim; this holds the line when it is bypassed or two creates
+	// race, so a newer Endpoint never silently shadows the route of the one
+	// already serving.
 	reason, msg, err := r.conflict(ctx, ep)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -129,7 +126,8 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 		return ctrl.Result{}, err
 	}
 
-	if !hasWeightedBackend(ep.Spec.BackendRefs) {
+	// A catch-all rule carries its own weights for unmatched requests.
+	if n := len(ep.Spec.Rules); (n == 0 || len(ep.Spec.Rules[n-1].Matches) > 0) && !hasWeightedBackend(ep.Spec.BackendRefs) {
 		controller.MarkFalseCondition(ep, ConditionReady, ReasonNoWeightedBackend,
 			"Every backend has weight 0, so the Endpoint would serve nothing; give at least one backend a weight above 0")
 		return ctrl.Result{}, nil
@@ -148,9 +146,10 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 
 	releaseHash := computeReleaseHash(ReleaseSpec{
 		EndpointType: snapshot,
-		Address:      ep.Spec.Address,
-		TakeOver:     ep.Spec.TakeOver,
+		Visibility:   ep.Spec.Visibility,
 		BackendRefs:  ep.Spec.BackendRefs,
+		Rules:        ep.Spec.Rules,
+		Schema:       ep.Spec.Schema,
 		Parameters:   ep.Spec.Parameters,
 	})
 
@@ -162,6 +161,13 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 		ep.Status.LatestRelease = &openchoreov1alpha1.LatestEndpointRelease{
 			Name: erName,
 			Hash: releaseHash,
+		}
+	}
+
+	if ep.Spec.AutoDeploy {
+		if done, err := r.autoDeploy(ctx, ep); err != nil || !done {
+			// !done: a Ready=False condition explains what is missing.
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -207,29 +213,14 @@ func (r *Reconciler) resolveType(ctx context.Context, ep *openchoreov1alpha1.End
 	}
 }
 
-// keepOrphaned handles an Endpoint with no backends left and reclaimPolicy
-// Retain: it stays as Orphaned, its bindings are deleted so it routes nothing,
-// and adding a backend brings it back.
-func (r *Reconciler) keepOrphaned(ctx context.Context, ep *openchoreov1alpha1.Endpoint) error {
-	controller.MarkTrueCondition(ep, ConditionOrphaned, ReasonNoBackends,
-		"No backends left; kept without routes until a backend is added (reclaimPolicy Retain)")
-	controller.MarkFalseCondition(ep, ConditionReady, ReasonNoBackends, "Endpoint has no backends")
-	_, err := r.deleteOwnedEndpointReleaseBindings(ctx, ep)
-	return err
-}
-
-// missingBackendComponents returns the distinct component names, the
-// taken-over component and the component backends, that do not exist as
-// Components of the Endpoint's project. Backends at weight 0 are skipped: they
+// missingBackendComponents returns the distinct component backends that do
+// not exist as Components of the Endpoint's project. Backends at weight 0 are skipped: they
 // receive no traffic, so a canary can be staged before its component exists.
 // External backends are not checked; OpenChoreo does not run them. Whether the
 // referenced workload endpoints exist is checked per environment by the
 // binding controller.
 func (r *Reconciler) missingBackendComponents(ctx context.Context, ep *openchoreov1alpha1.Endpoint) ([]string, error) {
 	var names []string
-	if t := controller.TakenOver(ep); t != nil {
-		names = append(names, t.Name)
-	}
 	for _, ref := range ep.Spec.BackendRefs {
 		if name, _, ok := controller.BackendComponent(ref); ok && controller.EndpointBackendWeight(ref) > 0 {
 			names = append(names, name)
@@ -268,51 +259,33 @@ func hasWeightedBackend(refs []openchoreov1alpha1.EndpointBackendRef) bool {
 	return false
 }
 
-// conflict reports why ep must not route, if another Endpoint holds its
-// address or its take-over: the oldest Endpoint that is not being deleted keeps
-// a claim, ties broken by name. Addresses on the environment host compare
-// within the namespace, own hostnames across namespaces. It lists and filters
-// in memory, so it works with cached and uncached clients alike.
+// conflict reports why ep must not route, if another Endpoint already claims
+// one of its route slots, the same workload endpoint of a component in the
+// same visibility: the oldest Endpoint that is not being deleted keeps it,
+// ties broken by name. It lists and filters in memory, so it works with cached
+// and uncached clients alike.
 func (r *Reconciler) conflict(ctx context.Context, ep *openchoreov1alpha1.Endpoint) (controller.ConditionReason, string, error) {
 	var endpoints openchoreov1alpha1.EndpointList
-	if err := r.List(ctx, &endpoints); err != nil {
+	if err := r.List(ctx, &endpoints, client.InNamespace(ep.Namespace)); err != nil {
 		return "", "", fmt.Errorf("list Endpoints: %w", err)
 	}
-	var addressHolder, takeOverHolder *openchoreov1alpha1.Endpoint
+	var holder *openchoreov1alpha1.Endpoint
+	var slot controller.EndpointSlot
 	for i := range endpoints.Items {
 		other := &endpoints.Items[i]
-		if (other.Name == ep.Name && other.Namespace == ep.Namespace) || !other.DeletionTimestamp.IsZero() ||
-			!olderEndpoint(other, ep) {
+		if other.Name == ep.Name || !other.DeletionTimestamp.IsZero() || !olderEndpoint(other, ep) {
 			continue
 		}
-		if controller.SameEndpointAddress(ep, other) && (addressHolder == nil || olderEndpoint(other, addressHolder)) {
-			addressHolder = other
-		}
-		if controller.SameEndpointTakeOver(ep, other) && (takeOverHolder == nil || olderEndpoint(other, takeOverHolder)) {
-			takeOverHolder = other
+		if s, ok := controller.SharedEndpointSlot(ep, other); ok && (holder == nil || olderEndpoint(other, holder)) {
+			holder, slot = other, s
 		}
 	}
-	switch {
-	case addressHolder != nil:
-		return ReasonAddressInUse, fmt.Sprintf("The address %s is already served by Endpoint %s/%s; this Endpoint routes nothing until it is freed",
-			describeAddress(ep.Spec.Address), addressHolder.Namespace, addressHolder.Name), nil
-	case takeOverHolder != nil:
-		t := controller.TakenOver(ep)
-		return ReasonTakeOverInUse, fmt.Sprintf("The URL of %s/%s is already taken over by Endpoint %q; this Endpoint routes nothing until it is freed",
-			t.Name, t.Endpoint, takeOverHolder.Name), nil
+	if holder == nil {
+		return "", "", nil
 	}
-	return "", "", nil
-}
-
-// describeAddress renders an address for messages.
-func describeAddress(a *openchoreov1alpha1.EndpointAddress) string {
-	if a == nil {
-		return "(none)"
-	}
-	if a.Hostname == "" {
-		return a.Path + " (environment host)"
-	}
-	return a.Hostname + a.Path
+	return ReasonSlotInUse, fmt.Sprintf(
+		"Endpoint %q already routes %s/%s with %s visibility; this Endpoint routes nothing until it is freed. Add the backend to %q instead, or use another visibility",
+		holder.Name, slot.Component, slot.Endpoint, slot.Visibility, holder.Name), nil
 }
 
 // olderEndpoint reports whether a was created before b, ties broken by name.
@@ -345,9 +318,10 @@ func (r *Reconciler) ensureEndpointRelease(
 				EndpointName: ep.Name,
 			},
 			EndpointType: snapshot,
-			Address:      ep.Spec.Address,
-			TakeOver:     ep.Spec.TakeOver,
+			Visibility:   ep.Spec.Visibility,
 			BackendRefs:  ep.Spec.BackendRefs,
+			Rules:        ep.Spec.Rules,
+			Schema:       ep.Spec.Schema,
 			Parameters:   ep.Spec.Parameters,
 		},
 	}
@@ -394,7 +368,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&openchoreov1alpha1.Component{},
 			handler.EnqueueRequestsFromMapFunc(r.listEndpointsForComponent)).
 		Watches(&openchoreov1alpha1.Endpoint{},
-			handler.EnqueueRequestsFromMapFunc(r.listEndpointsSharingURL)).
+			handler.EnqueueRequestsFromMapFunc(r.listEndpointsSharingSlot)).
 		Named("endpoint").
 		Complete(r)
 }

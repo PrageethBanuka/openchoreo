@@ -50,17 +50,10 @@ func fixtureBackends() []Backend {
 	}
 }
 
-// fixtureAddress is the fixture Endpoint's own address.
-func fixtureAddress() AddressContext {
-	return AddressContext{Host: "development-default.openchoreoapis.localhost", Path: "/payments"}
-}
-
-// fixtureTakeOver is payments-v1's api URL, taken over by the fixture Endpoint.
-func fixtureTakeOver() *URLContext {
-	return &URLContext{
-		ComponentName: "payments-v1", Endpoint: "api", BasePath: "/",
-		External: &Address{Scheme: "http", Host: "development-default.openchoreoapis.localhost", Port: 19080, Path: "/payments-v1-api"},
-	}
+// fixtureRules is the catch-all rule the binding controller adds when the
+// Endpoint declares none: the backends' own split.
+func fixtureRules() []Rule {
+	return []Rule{{Name: "default", Matches: []Match{}, Backends: fixtureBackends(), Mirrors: []Mirror{}}}
 }
 
 // weightedRouteTemplate is the HTTPRoute shape from the Endpoint design: one
@@ -131,7 +124,7 @@ func TestRender_WeightedHTTPRoute(t *testing.T) {
 		},
 		Parameters:  rawExt(t, map[string]any{"hostname": "payments.shop.example.com"}),
 		Backends:    fixtureBackends(),
-		Address:     fixtureAddress(),
+		Rules:       fixtureRules(),
 		Metadata:    fixtureMetadata(),
 		Environment: fixtureGateway(),
 	})
@@ -179,7 +172,7 @@ func TestRender_ForEachOverBackends(t *testing.T) {
 			}},
 		},
 		Backends: fixtureBackends(),
-		Address:  fixtureAddress(),
+		Rules:    fixtureRules(),
 		Metadata: fixtureMetadata(),
 	})
 	require.NoError(t, err)
@@ -201,7 +194,7 @@ func TestRender_IncludeWhenSkipsEntry(t *testing.T) {
 	out, err := p.Render(context.Background(), &RenderInput{
 		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{route}},
 		Backends:         fixtureBackends(),
-		Address:          fixtureAddress(),
+		Rules:            fixtureRules(),
 		Metadata:         fixtureMetadata(),
 		Environment:      fixtureGateway(),
 	})
@@ -216,16 +209,16 @@ func TestRender_ValidationFailureAborts(t *testing.T) {
 		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{
 			Validations: []v1alpha1.ValidationRule{{
 				Rule:    "${backends.all(b, b.protocol == 'HTTP')}",
-				Message: "http-weighted only routes HTTP endpoints",
+				Message: "http only routes HTTP endpoints",
 			}},
 			Resources: []v1alpha1.ResourceTemplate{weightedRouteTemplate(t)},
 		},
 		Backends: []Backend{{ComponentName: "c", Endpoint: "rpc", Protocol: "gRPC", ServiceName: "c", Port: 9090, Weight: 1}},
-		Address:  fixtureAddress(),
+		Rules:    fixtureRules(),
 		Metadata: fixtureMetadata(),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "http-weighted only routes HTTP endpoints")
+	assert.Contains(t, err.Error(), "http only routes HTTP endpoints")
 }
 
 func TestRender_RejectsNonDataPlaneTarget(t *testing.T) {
@@ -237,7 +230,7 @@ func TestRender_RejectsNonDataPlaneTarget(t *testing.T) {
 	_, err := p.Render(context.Background(), &RenderInput{
 		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{route}},
 		Backends:         fixtureBackends(),
-		Address:          fixtureAddress(),
+		Rules:            fixtureRules(),
 		Metadata:         fixtureMetadata(),
 	})
 	require.Error(t, err)
@@ -259,82 +252,48 @@ func TestRender_RejectsMissingInputs(t *testing.T) {
 	assert.Contains(t, err.Error(), "Namespace is empty")
 }
 
-// addressRouteTemplate is the shape the shipped http-weighted type follows:
-// one route for the Endpoint's own address, a second for the taken-over URL
-// when there is one, both splitting across every backend by weight.
-func addressRouteTemplates(t *testing.T) []v1alpha1.ResourceTemplate {
-	route := func(id, host, path, include string) v1alpha1.ResourceTemplate {
-		tmpl := v1alpha1.ResourceTemplate{
-			ID: id,
+func TestRender_ExposesRulesAndVisibility(t *testing.T) {
+	p := NewPipeline()
+	rules := []Rule{
+		{
+			Name:     "preview",
+			Matches:  []Match{{Headers: []HeaderMatch{{Name: "x-preview", Type: "Exact", Value: "green"}}, Cookies: []CookieMatch{}, QueryParams: []QueryParamMatch{}}},
+			Backends: fixtureBackends()[1:],
+			Mirrors:  []Mirror{},
+		},
+		fixtureRules()[0],
+	}
+	out, err := p.Render(context.Background(), &RenderInput{
+		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{{
+			ID: "summary",
 			Template: rawExt(t, map[string]any{
-				"apiVersion": "gateway.networking.k8s.io/v1",
-				"kind":       "HTTPRoute",
-				"metadata":   map[string]any{"name": "${metadata.name}-" + id, "namespace": "${metadata.namespace}"},
-				"spec": map[string]any{
-					"parentRefs": []any{map[string]any{"name": "${gateway.ingress.external.name}"}},
-					"hostnames":  []any{host},
-					"rules": []any{map[string]any{
-						"matches":     []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": path}}},
-						"backendRefs": `${backends.map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})}`,
-					}},
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "${metadata.name}", "namespace": "${metadata.namespace}"},
+				"data": map[string]any{
+					"visibility": `${visibility.join(",")}`,
+					"rules":      `${rules.map(r, r.name + ":" + string(size(r.matches)) + ":" + r.backends.map(b, b.componentName).join("+")).join(",")}`,
 				},
 			}),
-		}
-		if include != "" {
-			tmpl.IncludeWhen = include
-		}
-		return tmpl
-	}
-	return []v1alpha1.ResourceTemplate{
-		route("route", "${address.host}", "${address.path}", ""),
-		route("takeover", "${takeOver.external.host}", "${takeOver.external.path}", "${takeOver != null}"),
-	}
-}
-
-func TestRender_ServesTheEndpointAddressAndTakeOver(t *testing.T) {
-	p := NewPipeline()
-
-	backends := fixtureBackends()
-	backends = append(backends, Backend{
-		Name: "legacy", Kind: "External", Protocol: "HTTP", ServiceName: "e-payments-legacy", Port: 443, Weight: 0,
-		External: &ExternalBackend{Scheme: "https", Host: "legacy.example.com", Port: 443, URL: "https://legacy.example.com"},
+		}}},
+		Visibility: []string{"external", "internal"},
+		Backends:   fixtureBackends(),
+		Rules:      rules,
+		Metadata:   fixtureMetadata(),
 	})
-
-	render := func(takeOver *URLContext) []RenderedEntry {
-		out, err := p.Render(context.Background(), &RenderInput{
-			EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: addressRouteTemplates(t)},
-			Backends:         backends,
-			Address:          fixtureAddress(),
-			TakeOver:         takeOver,
-			Metadata:         fixtureMetadata(),
-			Environment:      fixtureGateway(),
-		})
-		require.NoError(t, err)
-		return out.Entries
-	}
-
-	entries := render(nil)
-	require.Len(t, entries, 1, "without a take-over only the Endpoint's own address is routed")
-	spec := entries[0].Object["spec"].(map[string]any)
-	assert.JSONEq(t, `["development-default.openchoreoapis.localhost"]`, jsonOf(t, spec["hostnames"]))
-	split := `[{"name":"payments-v1","port":8080,"weight":90},{"name":"payments-v2","port":8080,"weight":10},{"name":"e-payments-legacy","port":443,"weight":0}]`
-	assert.JSONEq(t, `[{"matches":[{"path":{"type":"PathPrefix","value":"/payments"}}],"backendRefs":`+split+`}]`,
-		jsonOf(t, spec["rules"]), "external backends join the same split")
-
-	entries = render(fixtureTakeOver())
-	require.Len(t, entries, 2)
-	takeOverSpec := entries[1].Object["spec"].(map[string]any)
-	assert.JSONEq(t, `[{"matches":[{"path":{"type":"PathPrefix","value":"/payments-v1-api"}}],"backendRefs":`+split+`}]`,
-		jsonOf(t, takeOverSpec["rules"]), "the taken-over URL carries the same split")
+	require.NoError(t, err)
+	data := out.Entries[0].Object["data"].(map[string]any)
+	assert.Equal(t, "external,internal", data["visibility"])
+	assert.Equal(t, "preview:1:payments-v2,default:0:payments-v1+payments-v2", data["rules"])
 }
 
-func TestRender_RequiresAddress(t *testing.T) {
+func TestRender_RequiresRules(t *testing.T) {
 	p := NewPipeline()
 	_, err := p.Render(context.Background(), &RenderInput{
-		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: addressRouteTemplates(t)},
+		EndpointTypeSpec: &v1alpha1.EndpointTypeSpec{Resources: []v1alpha1.ResourceTemplate{weightedRouteTemplate(t)}},
 		Backends:         fixtureBackends(),
 		Metadata:         fixtureMetadata(),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "input.Address is unset")
+	assert.Contains(t, err.Error(), "input.Rules is empty")
 }

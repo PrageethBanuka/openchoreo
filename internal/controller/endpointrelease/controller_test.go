@@ -44,7 +44,7 @@ var _ = Describe("EndpointRelease Controller", func() {
 						},
 						EndpointType: openchoreov1alpha1.EndpointReleaseEndpointType{
 							Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType,
-							Name: "http-weighted",
+							Name: "http",
 							Spec: openchoreov1alpha1.EndpointTypeSpec{
 								Resources: []openchoreov1alpha1.ResourceTemplate{
 									{
@@ -56,7 +56,7 @@ var _ = Describe("EndpointRelease Controller", func() {
 								},
 							},
 						},
-						Address: &openchoreov1alpha1.EndpointAddress{Path: "/test-endpoint"},
+						Visibility: []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal},
 						BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
 							{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "api"}},
 						},

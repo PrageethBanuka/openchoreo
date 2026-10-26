@@ -37,18 +37,10 @@ type EndpointReleaseBindingSpec struct {
 	// +kubebuilder:validation:Schemaless
 	EndpointTypeEnvironmentConfigs *runtime.RawExtension `json:"endpointTypeEnvironmentConfigs,omitempty"`
 
-	// Hostname overrides the Endpoint's address.hostname in this environment,
-	// for example payments.staging.example.com. It must match the
-	// EndpointType's allowedHostnames.
-	// +optional
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$`
-	Hostname string `json:"hostname,omitempty"`
-
 	// BackendOverrides sets environment-specific values for the release's
-	// backends, matched by name: an external backend's URL, so staging can call
-	// a staging service, and a backend's weight, so each environment can run its
-	// own traffic split while the release stays the same.
+	// backends, matched by name. Today it sets a backend's weight, so each
+	// environment can run its own traffic split (a canary step, a blue/green
+	// switch) while the release stays the same.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -62,32 +54,15 @@ type EndpointBackendOverride struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// External overrides an external backend's URL in this environment.
-	// +optional
-	External *EndpointExternalRef `json:"external,omitempty"`
-
 	// Weight replaces the release's weight for this backend in this
-	// environment, with the same semantics: relative to the other backends'
-	// weights, and 0 sends no traffic. It changes the split without cutting a
-	// new release; status.backends reports the effective weight.
+	// environment, in spec.backendRefs and in every rule that names it, with
+	// the same semantics: relative to the other backends' weights, and 0 sends
+	// no traffic. It changes the split without cutting a new release;
+	// status.backends reports the effective weight.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1000000
 	Weight *int32 `json:"weight,omitempty"`
-}
-
-// EndpointResolvedAddress is an address a binding serves in its environment.
-type EndpointResolvedAddress struct {
-	// Kind is Address for the Endpoint's own address and TakeOver for a
-	// taken-over component URL.
-	// +kubebuilder:validation:Enum=Address;TakeOver
-	Kind string `json:"kind"`
-
-	// Host is the hostname clients call.
-	Host string `json:"host"`
-
-	// Path is the path prefix clients call.
-	Path string `json:"path"`
 }
 
 // EndpointReleaseBindingOwner identifies the endpoint this EndpointReleaseBinding belongs to.
@@ -144,12 +119,6 @@ type EndpointReleaseBindingStatus struct {
 	// still progressing or its backends are unresolved.
 	// +optional
 	Serving *EndpointServingClaim `json:"serving,omitempty"`
-
-	// Addresses are the host and path pairs this binding serves in its
-	// environment, recorded once resolved. Bindings compare them to keep one
-	// route per address.
-	// +optional
-	Addresses []EndpointResolvedAddress `json:"addresses,omitempty"`
 }
 
 // EndpointServingClaim is the routing an EndpointReleaseBinding is serving in
@@ -160,18 +129,17 @@ type EndpointServingClaim struct {
 	// +kubebuilder:validation:MinLength=1
 	EndpointRelease string `json:"endpointRelease"`
 
-	// URLs are the component workload endpoints whose URLs the accepted routes
-	// serve: the Endpoint's spec.url. Those components stop rendering their own
-	// routes for them; other backends keep their own URLs.
+	// URLs are the component workload endpoints the accepted routes serve: the
+	// Endpoint's component backends. Those components stop rendering their own
+	// gateway routes for them in the claimed visibilities.
 	// +optional
 	// +listType=map
 	// +listMapKey=componentName
 	// +listMapKey=endpoint
 	URLs []EndpointBackendSlot `json:"urls,omitempty"`
 
-	// Visibilities are the gateway visibilities the accepted routes serve, from
-	// their openchoreo.dev/endpoint-visibility label (external by default).
-	// Component routes of other visibilities are left in place.
+	// Visibilities are the Endpoint's declared spec.visibility. Component routes
+	// of other visibilities are left in place.
 	// +optional
 	// +listType=set
 	Visibilities []EndpointVisibility `json:"visibilities,omitempty"`
@@ -216,15 +184,12 @@ type ResolvedEndpointBackend struct {
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`
 
-	// ExternalURL is the URL used in this environment, for an external backend.
-	// +optional
-	ExternalURL string `json:"externalURL,omitempty"`
-
 	// Weight is the effective weight applied to this backend.
 	// +optional
 	Weight int32 `json:"weight,omitempty"`
 
-	// ServiceURL is the in-cluster service URL of the backend in this environment.
+	// ServiceURL is the URL of the Service the Endpoint renders for this backend
+	// in this environment.
 	// +optional
 	ServiceURL *EndpointURL `json:"serviceURL,omitempty"`
 

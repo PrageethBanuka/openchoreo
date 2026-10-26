@@ -245,9 +245,8 @@ spec:
                     reverse index of Endpoints.
                   properties:
                     endpoint:
-                      description: |-
-                        Endpoint is the workload endpoint of this component the Endpoint routes to
-                        or serves the URL of.
+                      description: Endpoint is the workload endpoint of this component
+                        the Endpoint routes to.
                       type: string
                     environments:
                       description: |-
@@ -276,10 +275,6 @@ spec:
                     name:
                       description: Name of the Endpoint.
                       type: string
-                    servesURL:
-                      description: ServesURL is true when the Endpoint serves this
-                        workload endpoint's URL.
-                      type: boolean
                   required:
                   - endpoint
                   - name

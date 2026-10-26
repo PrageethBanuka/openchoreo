@@ -19,10 +19,6 @@ const (
 
 	// ConditionFinalizing indicates the Endpoint is being finalized (deleted).
 	ConditionFinalizing controller.ConditionType = "Finalizing"
-
-	// ConditionOrphaned is True while the Endpoint has no backends left. What
-	// happens next is decided by spec.reclaimPolicy.
-	ConditionOrphaned controller.ConditionType = "Orphaned"
 )
 
 // Constants for condition reasons
@@ -40,19 +36,16 @@ const (
 	// not exist in the Endpoint's project.
 	ReasonBackendNotFound controller.ConditionReason = "BackendNotFound"
 
-	// ReasonAddressInUse indicates another, older Endpoint already serves this
-	// Endpoint's address, so this one routes nothing.
-	ReasonAddressInUse controller.ConditionReason = "AddressInUse"
+	// ReasonSlotInUse indicates another, older Endpoint already routes one of
+	// this Endpoint's backends in the same visibility.
+	ReasonSlotInUse controller.ConditionReason = "SlotInUse"
 
-	// ReasonTakeOverInUse indicates another, older Endpoint already takes over
-	// the same component URL, so this one routes nothing.
-	ReasonTakeOverInUse controller.ConditionReason = "TakeOverInUse"
+	// ReasonAutoDeployFailed indicates autoDeploy could not find the first
+	// environment of the project's deployment pipeline.
+	ReasonAutoDeployFailed controller.ConditionReason = "AutoDeployFailed"
 
 	// ReasonNoWeightedBackend indicates every backend has weight 0.
 	ReasonNoWeightedBackend controller.ConditionReason = "NoWeightedBackend"
-
-	// ReasonNoBackends indicates the Endpoint has no backendRefs left.
-	ReasonNoBackends controller.ConditionReason = "NoBackends"
 
 	// ReasonFinalizing indicates the Endpoint is being finalized.
 	ReasonFinalizing controller.ConditionReason = "Finalizing"

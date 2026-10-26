@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -128,21 +127,6 @@ func (s *endpointService) UpdateEndpoint(ctx context.Context, namespaceName stri
 	if ep.Spec.Owner.ProjectName != existing.Spec.Owner.ProjectName {
 		return nil, &services.ValidationError{Msg: "spec.owner.projectName is immutable"}
 	}
-	// An update that leaves the address out keeps it; changing it is refused,
-	// since the address is the Endpoint's identity.
-	if ep.Spec.Address == nil || *ep.Spec.Address == (openchoreov1alpha1.EndpointAddress{}) {
-		ep.Spec.Address = existing.Spec.Address
-	}
-	if !equality.Semantic.DeepEqual(ep.Spec.Address, existing.Spec.Address) {
-		return nil, &services.ValidationError{Msg: "spec.address is immutable; create a new Endpoint to serve another address"}
-	}
-
-	// An update that leaves reclaimPolicy out keeps the current one rather than
-	// falling back to the CRD default.
-	if ep.Spec.ReclaimPolicy == "" {
-		ep.Spec.ReclaimPolicy = existing.Spec.ReclaimPolicy
-	}
-
 	// Only apply user-mutable fields to the existing object, preserving server-managed fields
 	createdFrom := existing.Annotations[labels.AnnotationKeyEndpointCreatedFrom]
 	existing.Spec = ep.Spec
@@ -201,12 +185,8 @@ func (s *endpointService) ListEndpoints(ctx context.Context, namespaceName, proj
 	return services.PreFilteredList(s.listEndpointsResource(namespaceName), filters...)(ctx, opts)
 }
 
-// routesTo reports whether the Endpoint has a backendRef to the component or
-// takes over one of its URLs.
+// routesTo reports whether the Endpoint has a backendRef to the component.
 func routesTo(ep openchoreov1alpha1.Endpoint, componentName string) bool {
-	if t := controller.TakenOver(&ep); t != nil && t.Name == componentName {
-		return true
-	}
 	for _, ref := range ep.Spec.BackendRefs {
 		if name, _, ok := controller.BackendComponent(ref); ok && name == componentName {
 			return true

@@ -59,8 +59,8 @@ func testEndpointObj(name string, components ...string) *openchoreov1alpha1.Endp
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testEPNs},
 		Spec: openchoreov1alpha1.EndpointSpec{
 			Owner:       openchoreov1alpha1.EndpointOwner{ProjectName: testEPProject},
-			Type:        openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http-weighted"},
-			Address:     &openchoreov1alpha1.EndpointAddress{Path: "/" + name},
+			Type:        openchoreov1alpha1.EndpointTypeRef{Kind: openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType, Name: "http"},
+			Visibility:  []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal},
 			BackendRefs: refs,
 		},
 	}
@@ -74,9 +74,9 @@ func newEndpointBody(name string, weights ...int32) gen.Endpoint {
 	body := gen.Endpoint{
 		Metadata: gen.ObjectMeta{Name: name},
 		Spec: &gen.EndpointSpec{
-			Type:        gen.EndpointTypeRef{Kind: ptr.To(gen.EndpointTypeRefKindClusterEndpointType), Name: "http-weighted"},
-			Address:     &gen.EndpointAddress{Path: "/" + name},
-			BackendRefs: &refs,
+			Type:        gen.EndpointTypeRef{Kind: ptr.To(gen.EndpointTypeRefKindClusterEndpointType), Name: "http"},
+			Visibility:  []gen.EndpointSpecVisibility{gen.EndpointSpecVisibilityExternal},
+			BackendRefs: refs,
 		},
 	}
 	body.Spec.Owner.ProjectName = testEPProject
@@ -145,8 +145,8 @@ func TestCreateEndpointHandler(t *testing.T) {
 		assert.Equal(t, "payments-api", typed.Metadata.Name)
 		require.NotNil(t, typed.Spec)
 		require.NotNil(t, typed.Spec.BackendRefs)
-		require.Len(t, *typed.Spec.BackendRefs, 2)
-		assert.Equal(t, int32(10), *(*typed.Spec.BackendRefs)[1].Weight)
+		require.Len(t, typed.Spec.BackendRefs, 2)
+		assert.Equal(t, int32(10), *typed.Spec.BackendRefs[1].Weight)
 	})
 
 	t.Run("nil body returns 400", func(t *testing.T) {
@@ -215,23 +215,13 @@ func TestUpdateEndpointHandler(t *testing.T) {
 	t.Run("success - changes the split", func(t *testing.T) {
 		h := newHandlerWithEndpointService(newEndpointService(t, []client.Object{testEndpointObj("payments-api", "payments-v1", "payments-v2")}, &allowAllPDP{}))
 		body := newEndpointBody("ignored", 50, 50)
-		body.Spec.Address = &gen.EndpointAddress{Path: "/payments-api"}
 		resp, err := h.UpdateEndpoint(ctx, gen.UpdateEndpointRequestObject{NamespaceName: testEPNs, EndpointName: "payments-api", Body: &body})
 		require.NoError(t, err)
 		typed, ok := resp.(gen.UpdateEndpoint200JSONResponse)
 		require.True(t, ok, "expected 200 response, got %T", resp)
 		assert.Equal(t, "payments-api", typed.Metadata.Name, "the path name wins over the body's")
 		require.NotNil(t, typed.Spec.BackendRefs)
-		assert.Equal(t, int32(50), *(*typed.Spec.BackendRefs)[0].Weight)
-	})
-
-	t.Run("address change returns 400", func(t *testing.T) {
-		h := newHandlerWithEndpointService(newEndpointService(t, []client.Object{testEndpointObj("payments-api", "payments-v1")}, &allowAllPDP{}))
-		body := newEndpointBody("payments-api", 100)
-		body.Spec.Address = &gen.EndpointAddress{Path: "/moved"}
-		resp, err := h.UpdateEndpoint(ctx, gen.UpdateEndpointRequestObject{NamespaceName: testEPNs, EndpointName: "payments-api", Body: &body})
-		require.NoError(t, err)
-		assert.IsType(t, gen.UpdateEndpoint400JSONResponse{}, resp)
+		assert.Equal(t, int32(50), *typed.Spec.BackendRefs[0].Weight)
 	})
 
 	t.Run("project change returns 400", func(t *testing.T) {

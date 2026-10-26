@@ -23,11 +23,10 @@ import (
 )
 
 // updateServingClaim records, as status.serving, the routing this binding
-// serves once the data plane has accepted the current render: the component
-// URL it takes over, if it rendered one, and the visibilities of the rendered
-// routes. That component reads it to stop rendering its own routes for it; the
-// Endpoint's backends keep their own URLs. Without a take-over the claim holds
-// no URLs, so no component route is suppressed.
+// serves once the data plane has accepted the current render: its component
+// backends' workload endpoints, in the Endpoint's declared visibilities. Those
+// components read it to stop rendering their own gateway routes for the
+// claimed (endpoint, visibility) slots, so each slot has one route.
 //
 // The claim only changes when RoutesReady is True for this render, so it
 // holds steady while a later render is progressing or its backends are
@@ -35,8 +34,7 @@ import (
 func updateServingClaim(
 	binding *openchoreov1alpha1.EndpointReleaseBinding,
 	release *openchoreov1alpha1.EndpointRelease,
-	output *endpointpipeline.RenderOutput,
-	tookOver bool,
+	backends []endpointpipeline.Backend,
 ) {
 	if !meta.IsStatusConditionTrue(binding.Status.Conditions, string(ConditionRoutesReady)) {
 		return
@@ -44,13 +42,8 @@ func updateServingClaim(
 
 	next := &openchoreov1alpha1.EndpointServingClaim{
 		EndpointRelease: release.Name,
-		Visibilities:    routeVisibilities(output),
-	}
-	if tookOver && release.Spec.TakeOver != nil {
-		next.URLs = []openchoreov1alpha1.EndpointBackendSlot{{
-			ComponentName: release.Spec.TakeOver.Component.Name,
-			Endpoint:      release.Spec.TakeOver.Component.Endpoint,
-		}}
+		Visibilities:    slices.Sorted(slices.Values(release.Spec.Visibility)),
+		URLs:            backendSlots(backends),
 	}
 
 	if cur := binding.Status.Serving; cur != nil && !cur.Releasing {
@@ -64,49 +57,32 @@ func updateServingClaim(
 	binding.Status.Serving = next
 }
 
-// routeVisibilities returns the distinct visibilities of the rendered Gateway
-// API routes, read from their openchoreo.dev/endpoint-visibility label and
-// defaulting to external, sorted for a stable status. Mesh routes, whose
-// parents are all Services (GAMMA), serve in-cluster callers rather than a
-// gateway, so they claim no gateway visibility.
-func routeVisibilities(output *endpointpipeline.RenderOutput) []openchoreov1alpha1.EndpointVisibility {
-	var visibilities []openchoreov1alpha1.EndpointVisibility
-	for i := range output.Entries {
-		obj := &unstructured.Unstructured{Object: output.Entries[i].Object}
-		if endpointurl.RouteKind(obj) == "" || isMeshRoute(obj) {
-			continue
-		}
-		v := openchoreov1alpha1.EndpointVisibility(obj.GetLabels()[labels.LabelKeyEndpointVisibility])
-		if v == "" {
-			v = openchoreov1alpha1.EndpointVisibilityExternal
-		}
-		if !slices.Contains(visibilities, v) {
-			visibilities = append(visibilities, v)
+// backendSlots returns the distinct component workload endpoints of the
+// resolved backends, sorted for a stable status.
+func backendSlots(backends []endpointpipeline.Backend) []openchoreov1alpha1.EndpointBackendSlot {
+	var slots []openchoreov1alpha1.EndpointBackendSlot
+	for _, b := range backends {
+		s := openchoreov1alpha1.EndpointBackendSlot{ComponentName: b.ComponentName, Endpoint: b.Endpoint}
+		if b.ComponentName != "" && !slices.Contains(slots, s) {
+			slots = append(slots, s)
 		}
 	}
-	slices.Sort(visibilities)
-	return visibilities
-}
-
-// isMeshRoute reports whether every parentRef of a Gateway API route is a
-// core Service, which makes it a GAMMA mesh route.
-func isMeshRoute(obj *unstructured.Unstructured) bool {
-	parents, found, err := unstructured.NestedSlice(obj.Object, "spec", "parentRefs")
-	if err != nil || !found || len(parents) == 0 {
-		return false
-	}
-	for _, p := range parents {
-		ref, ok := p.(map[string]any)
-		if !ok {
-			return false
+	slices.SortFunc(slots, func(a, b openchoreov1alpha1.EndpointBackendSlot) int {
+		if a.ComponentName != b.ComponentName {
+			if a.ComponentName < b.ComponentName {
+				return -1
+			}
+			return 1
 		}
-		kind, _ := ref["kind"].(string)
-		group, _ := ref["group"].(string)
-		if kind != "Service" || (group != "" && group != "core") {
-			return false
+		if a.Endpoint < b.Endpoint {
+			return -1
 		}
-	}
-	return true
+		if a.Endpoint > b.Endpoint {
+			return 1
+		}
+		return 0
+	})
+	return slots
 }
 
 func sameClaim(a, b *openchoreov1alpha1.EndpointServingClaim) bool {

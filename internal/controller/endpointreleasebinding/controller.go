@@ -7,13 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -66,6 +64,8 @@ type reconcileInputs struct {
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpointreleases,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=endpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=releasebindings,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=componentreleases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=components,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=environments,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=dataplanes,verbs=get;list;watch
@@ -124,7 +124,7 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 
 	md := buildMetadataContext(binding, in)
 
-	resolution, err := r.resolveBackends(ctx, binding, in.release, md)
+	resolution, err := r.resolveBackends(ctx, binding, in, md)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -139,79 +139,25 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 				binding.Spec.Environment, strings.Join(resolution.unresolved, ", ")))
 		return ctrl.Result{}, nil
 	}
-	if !slices.ContainsFunc(resolution.backends, func(b endpointpipeline.Backend) bool { return b.Weight > 0 }) {
-		controller.MarkFalseCondition(binding, ConditionBackendsResolved, ReasonBackendsUnresolved,
-			"No backend with a non-zero weight is available; check the weights in spec.backendOverrides")
+	rules, problem := buildRules(binding, in.release, resolution)
+	if problem != "" {
+		controller.MarkFalseCondition(binding, ConditionBackendsResolved, ReasonBackendsUnresolved, problem)
 		return ctrl.Result{}, nil
 	}
 
 	controller.MarkTrueCondition(binding, ConditionBackendsResolved, ReasonBackendsResolved,
 		fmt.Sprintf("%d backend(s) resolved", len(resolution.backends)))
 
-	// A Service-addressed type serves the taken-over component's in-cluster
-	// Service, not an address of its own, so there is no gateway address to
-	// resolve or to claim.
-	servesService := in.release.Spec.EndpointType.Spec.ServesService()
-	var address endpointpipeline.AddressContext
-	if !servesService {
-		var problem string
-		address, problem = resolveAddress(binding, in)
-		if problem != "" {
-			markSyncedFalse(binding, ReasonAddressInvalid, "The Endpoint's address can't be served: "+problem)
-			return ctrl.Result{}, nil
-		}
-	}
-
-	// A take-over the component can't serve here yet is not an error: the
-	// Endpoint still serves its own address, and the take-over follows once
-	// the component is deployed (ReleaseBinding watches re-run this).
-	takeOver, pending, err := r.resolveTakeOver(ctx, binding, in.release, md.Namespace)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	switch {
-	case in.release.Spec.TakeOver == nil:
-		meta.RemoveStatusCondition(&binding.Status.Conditions, string(ConditionTakeOver))
-	case pending != "" && servesService:
-		// The taken-over Service is the only address a Service type serves, so
-		// there is nothing to route until it exists here.
-		controller.MarkFalseCondition(binding, ConditionTakeOver, ReasonTakeOverPending,
-			"Nothing to route yet; the taken-over Service follows once it is available: "+pending)
-		markSyncedFalse(binding, ReasonTakeOverPending,
-			"Waiting for the taken-over component's Service in environment "+binding.Spec.Environment)
-		return ctrl.Result{}, nil
-	case pending != "":
-		controller.MarkFalseCondition(binding, ConditionTakeOver, ReasonTakeOverPending,
-			"Serving the Endpoint's own address only; the taken-over URL follows once it is available: "+pending)
-	default:
-		controller.MarkTrueCondition(binding, ConditionTakeOver, ReasonTakeOverServed,
-			fmt.Sprintf("Also serving the URL of %s/%s", takeOver.ComponentName, takeOver.Endpoint))
-	}
-
-	var addrs []openchoreov1alpha1.EndpointResolvedAddress
-	if !servesService {
-		addrs = servedAddresses(address, takeOver)
-		conflict, err := r.addressConflict(ctx, binding, in.release, addrs)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if conflict != "" {
-			markSyncedFalse(binding, ReasonAddressInUse, conflict+"; this binding routes nothing until the address is free")
-			return ctrl.Result{}, nil
-		}
-	}
-	binding.Status.Addresses = addrs
-
 	ctx = template.WithReconcileBudget(ctx, r.CELCostLimit)
 
-	output, rr, err := r.renderAndEmit(ctx, binding, in, md, resolution.backends, address, takeOver)
+	output, rr, err := r.renderAndEmit(ctx, binding, in, md, resolution.backends, rules)
 	if err != nil || rr == nil {
 		return ctrl.Result{}, err
 	}
 
 	resolveURLs(ctx, binding, in, output, resolution.backends)
 	evaluateRoutesReady(binding, rr)
-	updateServingClaim(binding, in.release, output, takeOver != nil)
+	updateServingClaim(binding, in.release, resolution.backends)
 	return ctrl.Result{}, nil
 }
 
@@ -304,8 +250,7 @@ func (r *Reconciler) renderAndEmit(
 	in *reconcileInputs,
 	md endpointpipeline.MetadataContext,
 	backends []endpointpipeline.Backend,
-	address endpointpipeline.AddressContext,
-	takeOver *endpointpipeline.URLContext,
+	rules []endpointpipeline.Rule,
 ) (*endpointpipeline.RenderOutput, *openchoreov1alpha1.RenderedRelease, error) {
 	logger := log.FromContext(ctx)
 
@@ -313,9 +258,9 @@ func (r *Reconciler) renderAndEmit(
 		EndpointTypeSpec:   &in.release.Spec.EndpointType.Spec,
 		Parameters:         in.release.Spec.Parameters,
 		EnvironmentConfigs: binding.Spec.EndpointTypeEnvironmentConfigs,
+		Visibility:         visibilityStrings(in.release.Spec.Visibility),
 		Backends:           backends,
-		Address:            address,
-		TakeOver:           takeOver,
+		Rules:              rules,
 		Metadata:           md,
 		DataPlane:          endpointpipeline.BuildDataPlaneContext(in.dataPlane),
 		Environment:        endpointpipeline.BuildEnvironmentContext(in.environment, in.dataPlane),
@@ -464,7 +409,7 @@ func validateReleaseOwner(release *openchoreov1alpha1.EndpointRelease, binding *
 }
 
 // validateBackendOverrides checks that every backendOverrides entry names a
-// backend of the pinned release, so a typo can't silently leave a weight or URL
+// backend of the pinned release, so a typo can't silently leave a weight
 // unchanged. A binding can be applied before its release (GitOps), so this is
 // checked here rather than at admission.
 func validateBackendOverrides(release *openchoreov1alpha1.EndpointRelease, binding *openchoreov1alpha1.EndpointReleaseBinding) error {
@@ -483,6 +428,15 @@ func validateBackendOverrides(release *openchoreov1alpha1.EndpointRelease, bindi
 			release.Name, strings.Join(unknown, ", "))
 	}
 	return nil
+}
+
+// visibilityStrings converts the declared visibilities for the render context.
+func visibilityStrings(vs []openchoreov1alpha1.EndpointVisibility) []string {
+	out := make([]string, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, string(v))
+	}
+	return out
 }
 
 // markSyncedFalse records Synced=False with the given reason and message.

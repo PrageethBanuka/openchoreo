@@ -29,11 +29,6 @@ const (
 
 	// ConditionFinalizing indicates the binding is being finalized (deleted).
 	ConditionFinalizing controller.ConditionType = "Finalizing"
-
-	// ConditionTakeOver reports whether the taken-over component URL is served
-	// in this environment. Informational: it does not gate Ready, since the
-	// Endpoint's own address is served either way.
-	ConditionTakeOver controller.ConditionType = "TakeOver"
 )
 
 // Constants for condition reasons
@@ -73,21 +68,6 @@ const (
 	// deployed in this environment. The previous RenderedRelease, if any, is
 	// left in place so traffic is not shifted to a missing backend.
 	ReasonBackendsUnresolved controller.ConditionReason = "BackendsUnresolved"
-
-	// ReasonAddressInvalid indicates the Endpoint's address can't be served in
-	// this environment, for example a hostname the EndpointType doesn't allow.
-	ReasonAddressInvalid controller.ConditionReason = "AddressInvalid"
-
-	// ReasonAddressInUse indicates another, older binding or a component's own
-	// route already serves one of this binding's addresses.
-	ReasonAddressInUse controller.ConditionReason = "AddressInUse"
-
-	// ReasonTakeOverPending indicates the taken-over component is not deployed
-	// with that endpoint in this environment yet.
-	ReasonTakeOverPending controller.ConditionReason = "TakeOverPending"
-
-	// ReasonTakeOverServed indicates the taken-over URL is served here.
-	ReasonTakeOverServed controller.ConditionReason = "TakeOverServed"
 
 	// ReasonReleaseCreated indicates the RenderedRelease was created or updated.
 	ReasonReleaseCreated controller.ConditionReason = "ReleaseCreated"

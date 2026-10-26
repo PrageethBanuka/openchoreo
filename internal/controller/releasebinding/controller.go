@@ -570,10 +570,6 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, releaseBinding *openc
 	// Gateway routes for workload endpoints claimed by an Endpoint are served by
 	// the Endpoint's route in this environment, so the component's own routes
 	// for those (endpoint, visibility) slots are not rendered.
-	if err := r.ensureExposedEndpointBindings(ctx, releaseBinding, snapshotWorkload); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to route exposed endpoints: %w", err)
-	}
-
 	endpointClaims, err := r.claimedEndpoints(ctx, releaseBinding)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to resolve endpoint claims: %w", err)

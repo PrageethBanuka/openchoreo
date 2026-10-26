@@ -17,8 +17,8 @@ import (
 
 const (
 	// endpointTypeRefIndex indexes Endpoint by its (Cluster)EndpointType reference.
-	// Index key format: "{kind}:{name}" — e.g. "EndpointType:http-weighted",
-	// "ClusterEndpointType:http-weighted". Mirrors Resource's resourceTypeRefIndex.
+	// Index key format: "{kind}:{name}" — e.g. "EndpointType:http",
+	// "ClusterEndpointType:http". Mirrors Resource's resourceTypeRefIndex.
 	endpointTypeRefIndex = "spec.type"
 )
 
@@ -66,13 +66,13 @@ func (r *Reconciler) listEndpointsForComponent(ctx context.Context, obj client.O
 		client.InNamespace(comp.Namespace))
 }
 
-// listEndpointsSharingURL returns reconcile requests for the other Endpoints
-// claiming the same address or take-over as the given one, so an Endpoint held
-// back by AddressInUse or TakeOverInUse takes over once the holder is deleted.
-func (r *Reconciler) listEndpointsSharingURL(ctx context.Context, obj client.Object) []reconcile.Request {
+// listEndpointsSharingSlot returns reconcile requests for the other Endpoints
+// claiming one of the given Endpoint's route slots, so an Endpoint held back by
+// SlotInUse routes once the holder is deleted or drops the backend.
+func (r *Reconciler) listEndpointsSharingSlot(ctx context.Context, obj client.Object) []reconcile.Request {
 	ep := obj.(*openchoreov1alpha1.Endpoint)
 	var endpoints openchoreov1alpha1.EndpointList
-	if err := r.List(ctx, &endpoints); err != nil {
+	if err := r.List(ctx, &endpoints, client.InNamespace(ep.Namespace)); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "Failed to list Endpoints with the same claims", "endpoint", ep.Name)
 		return nil
 	}
@@ -82,7 +82,7 @@ func (r *Reconciler) listEndpointsSharingURL(ctx context.Context, obj client.Obj
 		if other.Name == ep.Name && other.Namespace == ep.Namespace {
 			continue
 		}
-		if controller.SameEndpointAddress(ep, other) || controller.SameEndpointTakeOver(ep, other) {
+		if _, ok := controller.SharedEndpointSlot(ep, other); ok {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: other.Name, Namespace: other.Namespace},
 			})

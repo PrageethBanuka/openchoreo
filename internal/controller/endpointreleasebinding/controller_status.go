@@ -42,9 +42,9 @@ func resolveURLs(
 		if kind == "" || !endpointurl.RouteKindCompat[kind][protocol] {
 			continue
 		}
-		// The invoke URL is the Endpoint's own address; a taken-over URL is
-		// only a bridge for old clients.
-		if obj.GetLabels()[labels.LabelKeyEndpointRoute] == "takeover" {
+		// A mesh route serves in-cluster callers of the Endpoint's Service; it
+		// has no gateway URL.
+		if isMeshRoute(obj) {
 			continue
 		}
 
@@ -74,6 +74,27 @@ func resolveURLs(
 	if binding.Status.InvokeURL == "" {
 		binding.Status.InvokeURL = preferredURL(internal)
 	}
+}
+
+// isMeshRoute reports whether every parentRef of a Gateway API route is a
+// core Service, which makes it a GAMMA mesh route.
+func isMeshRoute(obj *unstructured.Unstructured) bool {
+	parents, found, err := unstructured.NestedSlice(obj.Object, "spec", "parentRefs")
+	if err != nil || !found || len(parents) == 0 {
+		return false
+	}
+	for _, p := range parents {
+		ref, ok := p.(map[string]any)
+		if !ok {
+			return false
+		}
+		kind, _ := ref["kind"].(string)
+		group, _ := ref["group"].(string)
+		if kind != "Service" || (group != "" && group != "core") {
+			return false
+		}
+	}
+	return true
 }
 
 // preferredURL returns the most secure URL a client should call: https, then

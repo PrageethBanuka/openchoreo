@@ -56,50 +56,30 @@ spec:
               EndpointType (or ClusterEndpointType) spec at the time it was cut. Created
               exclusively by the Endpoint controller.
             properties:
-              address:
-                description: |-
-                  Address is the URL the Endpoint serves, copied from the Endpoint spec.
-                  Unset for Endpoints of a Service-addressed type.
-                properties:
-                  hostname:
-                    description: |-
-                      Hostname is the Endpoint's own hostname, for example payments.example.com.
-                      It must match the EndpointType's allowedHostnames, and each environment's
-                      binding can override it. When unset, the environment's gateway host is
-                      used, the same host component URLs use.
-                    maxLength: 253
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$
-                    type: string
-                  path:
-                    description: Path is the path prefix clients call, for example
-                      /payments.
-                    maxLength: 200
-                    pattern: ^/[a-z0-9]([-a-z0-9/._]*[a-z0-9])?$
-                    type: string
-                required:
-                - path
-                type: object
               backendRefs:
                 description: |-
                   BackendRefs holds the snapshot of backend references and weights from the
                   Endpoint spec at release time.
                 items:
                   description: |-
-                    EndpointBackendRef is one backend of an Endpoint: a component workload
-                    endpoint or an external service, with its relative weight.
+                    EndpointBackendRef is one traffic backend of an Endpoint. It is a
+                    discriminated union on kind; exactly the payload matching kind must be set.
                   properties:
                     component:
-                      description: Component is a workload endpoint of a component
-                        in the Endpoint's project.
+                      description: |-
+                        Component references a workload endpoint of a Component in the Endpoint's
+                        project. Required when kind is Component.
                       properties:
                         endpoint:
                           description: |-
                             Endpoint is the name of the endpoint in the component's
-                            Workload.spec.endpoints. Determines the port and protocol.
+                            Workload.spec.endpoints to route to. Determines the backend port and protocol.
                           minLength: 1
                           type: string
                         name:
-                          description: Name is the name of the Component.
+                          description: |-
+                            Name is the name of the Component that serves this backend, in the
+                            Endpoint's project.
                           minLength: 1
                           pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                           type: string
@@ -107,24 +87,17 @@ spec:
                       - endpoint
                       - name
                       type: object
-                    external:
-                      description: |-
-                        External is a service outside OpenChoreo. Its URL is the default for every
-                        environment; a binding can override it.
-                      properties:
-                        url:
-                          description: URL is the service's base URL, for example
-                            https://legacy.example.com.
-                          maxLength: 2048
-                          pattern: ^https?://[a-zA-Z0-9]([-a-zA-Z0-9.]*[a-zA-Z0-9])?(:[0-9]{1,5})?(/.*)?$
-                          type: string
-                      required:
-                      - url
-                      type: object
+                    kind:
+                      default: Component
+                      description: Kind is the kind of backend this entry references.
+                      enum:
+                      - Component
+                      type: string
                     name:
                       description: |-
-                        Name identifies the backend within the Endpoint, for example payments-v1
-                        or legacy. Per-environment overrides refer to it.
+                        Name identifies this backend within the Endpoint. It is the list's map key,
+                        the handle status reports resolution against, and what rules, overrides and
+                        templates use to single out one backend.
                       maxLength: 63
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -143,8 +116,8 @@ spec:
                   - name
                   type: object
                   x-kubernetes-validations:
-                  - message: a backend sets exactly one of component or external
-                    rule: has(self.component) != has(self.external)
+                  - message: component must be set when kind is Component
+                    rule: self.kind != 'Component' || has(self.component)
                 minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
@@ -179,37 +152,22 @@ spec:
                       ClusterEndpointType source will lose them; revisit this field then. Mirrors
                       the ResourceReleaseResourceType precedent.
                     properties:
-                      addressKind:
-                        default: Gateway
-                        description: |-
-                          AddressKind is the kind of address Endpoints of this type serve. Gateway
-                          types serve the Endpoint's own address, a host and path on a gateway.
-                          Service types serve the in-cluster Service of the component the Endpoint
-                          takes over, so callers inside the cluster keep their URL (for example a
-                          service mesh route); their Endpoints set takeOver and no address.
-                        enum:
-                        - Gateway
-                        - Service
-                        type: string
                       allowedBackendKinds:
                         default:
                         - Component
-                        description: |-
-                          AllowedBackendKinds lists the backend kinds Endpoints of this type may use.
-                          External backends send traffic outside the cluster, so they must be
-                          allowed explicitly.
+                        description: AllowedBackendKinds lists the backend kinds Endpoints
+                          of this type may use.
                         items:
                           description: EndpointBackendKind is the kind of an Endpoint
                             backend.
                           enum:
                           - Component
-                          - External
                           type: string
                         type: array
                       allowedHostnames:
                         description: |-
-                          AllowedHostnames lists the hostnames Endpoints of this type may use as
-                          their own hostname. A leading "*." matches any one label, for example
+                          AllowedHostnames lists the hostnames Endpoints of this type may set in a
+                          hostname parameter. A leading "*." matches any one label, for example
                           "*.example.com". Empty means Endpoints use the environment's gateway host.
                         items:
                           type: string
@@ -242,10 +200,12 @@ spec:
                           Resources are the routing manifests (e.g. HTTPRoute, Ingress,
                           CiliumEnvoyConfig) the EndpointType emits on the data plane for each
                           EndpointReleaseBinding. Uses the same templating engine as ComponentType.
-                          At render time the CEL context exposes metadata.*, parameters.*,
-                          environmentConfigs.*, and backends[], where each backend carries
-                          componentName, endpoint, serviceName, port, weight, and serviceURL
-                          resolved for the binding's environment.
+                          At render time the CEL context exposes metadata, parameters,
+                          environmentConfigs, visibility[], rules[] (with each backend resolved),
+                          dataplane, environment, gateway, and backends[]. Each backend carries
+                          name, componentName, endpoint, protocol, weight (after the binding's
+                          overrides), podSelector and targetPort (to render its Service), and
+                          serviceName, port and serviceURL (the Service the Endpoint renders for it).
                         items:
                           description: ResourceTemplate defines a template for generating
                             Kubernetes resources
@@ -357,36 +317,203 @@ spec:
                   release time. The schema for these values is defined by the EndpointType's
                   parameters schema.
                 x-kubernetes-preserve-unknown-fields: true
-              takeOver:
-                description: TakeOver is the component URL the Endpoint also serves,
-                  if any.
+              rules:
+                description: Rules holds the snapshot of the Endpoint's routing rules.
+                items:
+                  description: EndpointRule sends requests that match it to chosen
+                    backends.
+                  properties:
+                    backends:
+                      description: |-
+                        Backends are the backends matching requests go to, by name, with relative
+                        weights.
+                      items:
+                        description: EndpointRuleBackend is a backend a rule sends
+                          traffic to.
+                        properties:
+                          name:
+                            description: Name is a backend in spec.backendRefs.
+                            minLength: 1
+                            type: string
+                          weight:
+                            default: 1
+                            description: |-
+                              Weight is this backend's share of the rule's traffic, relative to the
+                              rule's other backends; 0 sends none.
+                            format: int32
+                            maximum: 1000000
+                            minimum: 0
+                            type: integer
+                        required:
+                        - name
+                        type: object
+                      maxItems: 16
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
+                    matches:
+                      description: |-
+                        Matches select the requests this rule applies to: a request matches when
+                        any entry matches, and an entry matches when all of its conditions hold.
+                        A rule without matches applies to every request; only the last rule may
+                        omit them.
+                      items:
+                        description: EndpointMatch is one set of conditions a request
+                          must all meet.
+                        properties:
+                          cookies:
+                            description: |-
+                              Cookies the request must carry, by exact value. EndpointTypes render a
+                              cookie as a match on the Cookie header.
+                            items:
+                              description: EndpointCookieMatch is a cookie condition.
+                              properties:
+                                name:
+                                  description: Name is the cookie name.
+                                  pattern: ^[A-Za-z0-9_-]{1,64}$
+                                  type: string
+                                value:
+                                  description: |-
+                                    Value is the exact cookie value. Kept to safe characters, because types
+                                    embed it in a regular expression on the Cookie header.
+                                  pattern: ^[A-Za-z0-9_.-]{1,128}$
+                                  type: string
+                              required:
+                              - name
+                              - value
+                              type: object
+                            maxItems: 1
+                            type: array
+                          headers:
+                            description: Headers the request must carry.
+                            items:
+                              description: EndpointHeaderMatch is a header condition.
+                              properties:
+                                name:
+                                  description: Name is the header name, case-insensitive.
+                                  maxLength: 256
+                                  minLength: 1
+                                  pattern: ^[A-Za-z0-9!#$%&'*+\-.^_\x60|~]+$
+                                  type: string
+                                type:
+                                  default: Exact
+                                  description: Type is how the value is compared.
+                                  enum:
+                                  - Exact
+                                  - RegularExpression
+                                  type: string
+                                value:
+                                  description: Value is the expected value, or the
+                                    regular expression.
+                                  maxLength: 4096
+                                  type: string
+                              required:
+                              - name
+                              - value
+                              type: object
+                            maxItems: 8
+                            type: array
+                          queryParams:
+                            description: QueryParams the request URL must carry, by
+                              exact value.
+                            items:
+                              description: EndpointQueryParamMatch is a query parameter
+                                condition.
+                              properties:
+                                name:
+                                  description: Name is the query parameter name.
+                                  maxLength: 256
+                                  minLength: 1
+                                  type: string
+                                value:
+                                  description: Value is the exact expected value.
+                                  maxLength: 1024
+                                  type: string
+                              required:
+                              - name
+                              - value
+                              type: object
+                            maxItems: 8
+                            type: array
+                        type: object
+                      maxItems: 8
+                      type: array
+                    mirrors:
+                      description: |-
+                        Mirrors copy a share of this rule's requests to other backends and
+                        discard their responses.
+                      items:
+                        description: EndpointMirror copies a share of a rule's requests
+                          to a backend.
+                        properties:
+                          backend:
+                            description: Backend is a backend in spec.backendRefs,
+                              usually one at weight 0.
+                            minLength: 1
+                            type: string
+                          percent:
+                            description: Percent of the rule's requests to copy.
+                            format: int32
+                            maximum: 100
+                            minimum: 0
+                            type: integer
+                        required:
+                        - backend
+                        - percent
+                        type: object
+                      maxItems: 4
+                      type: array
+                    name:
+                      description: Name identifies the rule, so automation and GitOps
+                        can own it.
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - backends
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              schema:
+                description: Schema holds the snapshot of the Endpoint's API definition,
+                  if set.
                 properties:
-                  component:
-                    description: Component is the workload endpoint whose URL is taken
-                      over.
-                    properties:
-                      endpoint:
-                        description: |-
-                          Endpoint is the name of the endpoint in the component's
-                          Workload.spec.endpoints. Determines the port and protocol.
-                        minLength: 1
-                        type: string
-                      name:
-                        description: Name is the name of the Component.
-                        minLength: 1
-                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                        type: string
-                    required:
-                    - endpoint
-                    - name
-                    type: object
-                required:
-                - component
+                  content:
+                    description: Content is the definition itself.
+                    type: string
+                  type:
+                    description: Type is the kind of definition, for example OpenAPI
+                      or GraphQL.
+                    type: string
                 type: object
+              visibility:
+                description: |-
+                  Visibility is the snapshot of the scopes the Endpoint exposes its
+                  backends to.
+                items:
+                  description: |-
+                    EndpointVisibility defines the visibility scope for an endpoint.
+                    It determines which components can access the endpoint and how that access is enforced at runtime.
+                  enum:
+                  - project
+                  - namespace
+                  - internal
+                  - external
+                  type: string
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
             required:
             - backendRefs
             - endpointType
             - owner
+            - visibility
             type: object
             x-kubernetes-validations:
             - message: EndpointRelease spec is immutable
