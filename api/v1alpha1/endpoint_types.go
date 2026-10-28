@@ -113,6 +113,7 @@ const (
 // EndpointBackendRef is one traffic backend of an Endpoint. It is a
 // discriminated union on kind; exactly the payload matching kind must be set.
 // +kubebuilder:validation:XValidation:rule="self.kind != 'Component' || has(self.component)",message="component must be set when kind is Component"
+// +kubebuilder:validation:XValidation:rule="!has(self.mirror) || (has(self.weight) && self.weight == 0 && !has(self.match))",message="a backend with mirror only receives copies; set its weight to 0 and remove match"
 type EndpointBackendRef struct {
 	// Name identifies this backend within the Endpoint. It is the list's map key,
 	// the handle status reports resolution against, and what overrides and
@@ -141,20 +142,76 @@ type EndpointBackendRef struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1000000
 	Weight *int32 `json:"weight,omitempty"`
+
+	// Match sends every request that meets all of its conditions to this
+	// backend, whatever its weight. Other requests are split by weight, so a
+	// backend at weight 0 with a match receives only the requests it matches.
+	// When several backends match a request, the first one in the list gets it.
+	// +optional
+	Match *EndpointMatch `json:"match,omitempty"`
+
+	// Mirror sends this backend a copy of a share of the requests the Endpoint
+	// splits by weight, and discards its responses. Only a backend at weight 0
+	// without a match can be a mirror.
+	// +optional
+	Mirror *EndpointMirror `json:"mirror,omitempty"`
 }
 
-// EndpointMatch is one set of conditions a request must all meet.
+// EndpointMatch is the set of conditions a request must all meet.
+// +kubebuilder:validation:XValidation:rule="has(self.path) || has(self.headers) || has(self.cookies)",message="set a path, headers or cookies, or remove match"
 type EndpointMatch struct {
+	// Path the request must be for, relative to where the Endpoint is served:
+	// its path prefix at the gateway, the root of its Service in the mesh. A
+	// path of /next on an Endpoint served at /checkout matches /checkout/next.
+	// +optional
+	Path *EndpointPathMatch `json:"path,omitempty"`
+
 	// Headers the request must carry.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=8
 	Headers []EndpointHeaderMatch `json:"headers,omitempty"`
 
 	// Cookies the request must carry, by exact value. EndpointTypes render a
 	// cookie as a match on the Cookie header.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
 	Cookies []EndpointCookieMatch `json:"cookies,omitempty"`
+}
+
+// EndpointPathMatchType is how a request path is compared.
+// +kubebuilder:validation:Enum=PathPrefix;Exact
+type EndpointPathMatchType string
+
+const (
+	// EndpointPathMatchPathPrefix matches the path and every path below it.
+	EndpointPathMatchPathPrefix EndpointPathMatchType = "PathPrefix"
+	// EndpointPathMatchExact matches the path only.
+	EndpointPathMatchExact EndpointPathMatchType = "Exact"
+)
+
+// EndpointPathMatch is a path condition.
+type EndpointPathMatch struct {
+	// Type is how the path is compared.
+	// +optional
+	// +kubebuilder:default=PathPrefix
+	Type EndpointPathMatchType `json:"type,omitempty"`
+
+	// Value is the path, relative to where the Endpoint is served.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=1024
+	// +kubebuilder:validation:Pattern=`^/[^?#]*$`
+	Value string `json:"value"`
+}
+
+// EndpointMirror copies a share of requests to a backend.
+type EndpointMirror struct {
+	// Percent of the requests to copy, from 0 to 100.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	Percent int32 `json:"percent"`
 }
 
 // EndpointHeaderMatchType is how a header value is compared.

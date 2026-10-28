@@ -409,23 +409,32 @@ func validateReleaseOwner(release *openchoreov1alpha1.EndpointRelease, binding *
 }
 
 // validateBackendOverrides checks that every backendOverrides entry names a
-// backend of the pinned release, so a typo can't silently leave a weight
-// unchanged. A binding can be applied before its release (GitOps), so this is
-// checked here rather than at admission.
+// backend of the pinned release, and sets a mirror share only on a mirror
+// backend, so a typo can't silently leave the routing unchanged. A binding can
+// be applied before its release (GitOps), so this is checked here rather than
+// at admission.
 func validateBackendOverrides(release *openchoreov1alpha1.EndpointRelease, binding *openchoreov1alpha1.EndpointReleaseBinding) error {
-	known := make(map[string]struct{}, len(release.Spec.BackendRefs))
+	known := make(map[string]openchoreov1alpha1.EndpointBackendRef, len(release.Spec.BackendRefs))
 	for _, ref := range release.Spec.BackendRefs {
-		known[ref.Name] = struct{}{}
+		known[ref.Name] = ref
 	}
-	var unknown []string
+	var unknown, notMirrors []string
 	for _, o := range binding.Spec.BackendOverrides {
-		if _, ok := known[o.Name]; !ok {
+		ref, ok := known[o.Name]
+		switch {
+		case !ok:
 			unknown = append(unknown, o.Name)
+		case o.Mirror != nil && ref.Mirror == nil:
+			notMirrors = append(notMirrors, o.Name)
 		}
 	}
 	if len(unknown) > 0 {
 		return fmt.Errorf("spec.backendOverrides names backend(s) not in EndpointRelease %q: %s",
 			release.Name, strings.Join(unknown, ", "))
+	}
+	if len(notMirrors) > 0 {
+		return fmt.Errorf("spec.backendOverrides sets mirror on backend(s) that have no mirror in EndpointRelease %q: %s",
+			release.Name, strings.Join(notMirrors, ", "))
 	}
 	return nil
 }

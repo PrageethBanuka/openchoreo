@@ -183,3 +183,58 @@ func TestValidateParameters(t *testing.T) {
 	_, err = validator(t, typed).ValidateCreate(context.Background(), withParams(`{"rules":[]}`))
 	refused(t, err, "parameters do not match the schema")
 }
+
+func TestValidateMatches(t *testing.T) {
+	withMatch := func(ms ...openchoreodevv1alpha1.EndpointMatch) *openchoreodevv1alpha1.Endpoint {
+		ep := endpoint("cart", "shop", ext, "storefront", "storefront-recs", "storefront-beta")
+		for i := range ms {
+			ep.Spec.BackendRefs[i+1].Weight = ptr.To[int32](0)
+			ep.Spec.BackendRefs[i+1].Match = &ms[i]
+		}
+		return ep
+	}
+	regex := openchoreodevv1alpha1.EndpointHeaderMatchRegularExpression
+	v := validator(t, clusterType(nil))
+
+	_, err := v.ValidateCreate(context.Background(), withMatch(openchoreodevv1alpha1.EndpointMatch{
+		Path: &openchoreodevv1alpha1.EndpointPathMatch{Value: "/next"},
+		Headers: []openchoreodevv1alpha1.EndpointHeaderMatch{
+			{Name: "X-Client", Value: "ios"},
+			{Name: "user-agent", Type: regex, Value: ".*Mobi.*"},
+		},
+		Cookies: []openchoreodevv1alpha1.EndpointCookieMatch{{Name: "exp_cartrecs", Value: "b"}},
+	}))
+	require.NoError(t, err)
+
+	_, err = v.ValidateCreate(context.Background(), withMatch(openchoreodevv1alpha1.EndpointMatch{
+		Headers: []openchoreodevv1alpha1.EndpointHeaderMatch{
+			{Name: "X-Client", Value: "ios"},
+			{Name: "x-client", Value: "android"},
+		},
+	}))
+	refused(t, err, "Duplicate value")
+
+	_, err = v.ValidateCreate(context.Background(), withMatch(openchoreodevv1alpha1.EndpointMatch{
+		Headers: []openchoreodevv1alpha1.EndpointHeaderMatch{{Name: "Cookie", Type: regex, Value: ".*beta.*"}},
+		Cookies: []openchoreodevv1alpha1.EndpointCookieMatch{{Name: "exp_cartrecs", Value: "b"}},
+	}))
+	refused(t, err, "not both")
+
+	_, err = v.ValidateCreate(context.Background(), withMatch(openchoreodevv1alpha1.EndpointMatch{
+		Headers: []openchoreodevv1alpha1.EndpointHeaderMatch{{Name: "user-agent", Type: regex, Value: "(?=Mobi)"}},
+	}))
+	refused(t, err, "RE2")
+
+	for _, p := range []string{"/a/../admin", "/./a", "/a//b"} {
+		_, err = v.ValidateCreate(context.Background(), withMatch(openchoreodevv1alpha1.EndpointMatch{
+			Path: &openchoreodevv1alpha1.EndpointPathMatch{Value: p},
+		}))
+		refused(t, err, "match.path.value")
+	}
+
+	_, err = v.ValidateCreate(context.Background(), withMatch(
+		openchoreodevv1alpha1.EndpointMatch{Headers: []openchoreodevv1alpha1.EndpointHeaderMatch{{Name: "X-Preview", Value: "on"}}},
+		openchoreodevv1alpha1.EndpointMatch{Headers: []openchoreodevv1alpha1.EndpointHeaderMatch{{Name: "x-preview", Type: openchoreodevv1alpha1.EndpointHeaderMatchExact, Value: "on"}}},
+	))
+	refused(t, err, `backend "storefront-recs" has the same match`)
+}

@@ -193,6 +193,18 @@ const (
 	EndpointBackendRefKindComponent EndpointBackendRefKind = "Component"
 )
 
+// Defines values for EndpointMatchHeadersType.
+const (
+	EndpointMatchHeadersTypeExact             EndpointMatchHeadersType = "Exact"
+	EndpointMatchHeadersTypeRegularExpression EndpointMatchHeadersType = "RegularExpression"
+)
+
+// Defines values for EndpointMatchPathType.
+const (
+	EndpointMatchPathTypeExact      EndpointMatchPathType = "Exact"
+	EndpointMatchPathTypePathPrefix EndpointMatchPathType = "PathPrefix"
+)
+
 // Defines values for EndpointReleaseSpecEndpointTypeKind.
 const (
 	EndpointReleaseSpecEndpointTypeKindClusterEndpointType EndpointReleaseSpecEndpointTypeKind = "ClusterEndpointType"
@@ -2090,6 +2102,13 @@ type EndpointBackendRef struct {
 	// Kind Kind of backend
 	Kind *EndpointBackendRefKind `json:"kind,omitempty"`
 
+	// Match Conditions a request must all meet to go to this backend, whatever its weight.
+	// Other requests are split by weight. The first backend whose match holds gets the request.
+	Match *EndpointMatch `json:"match,omitempty"`
+
+	// Mirror Copies a share of the requests the Endpoint splits by weight to this backend; its responses are discarded. Only on a backend at weight 0 without a match.
+	Mirror *EndpointMirror `json:"mirror,omitempty"`
+
 	// Name Identifies the backend within the Endpoint; per-environment overrides refer to it
 	Name string `json:"name"`
 
@@ -2137,6 +2156,37 @@ type EndpointList struct {
 	// Pagination Cursor-based pagination metadata. Uses Kubernetes-native continuation tokens
 	// for efficient pagination through large result sets.
 	Pagination Pagination `json:"pagination"`
+}
+
+// EndpointMatch Conditions a request must all meet to go to this backend, whatever its weight.
+// Other requests are split by weight. The first backend whose match holds gets the request.
+type EndpointMatch struct {
+	Cookies *[]struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"cookies,omitempty"`
+	Headers *[]struct {
+		Name  string                    `json:"name"`
+		Type  *EndpointMatchHeadersType `json:"type,omitempty"`
+		Value string                    `json:"value"`
+	} `json:"headers,omitempty"`
+
+	// Path Path relative to where the Endpoint is served (its path prefix at the gateway, the root of its Service in the mesh)
+	Path *struct {
+		Type  *EndpointMatchPathType `json:"type,omitempty"`
+		Value string                 `json:"value"`
+	} `json:"path,omitempty"`
+}
+
+// EndpointMatchHeadersType defines model for EndpointMatch.Headers.Type.
+type EndpointMatchHeadersType string
+
+// EndpointMatchPathType defines model for EndpointMatch.Path.Type.
+type EndpointMatchPathType string
+
+// EndpointMirror Copies a share of the requests the Endpoint splits by weight to this backend; its responses are discarded. Only on a backend at weight 0 without a match.
+type EndpointMirror struct {
+	Percent int32 `json:"percent"`
 }
 
 // EndpointRelease EndpointRelease resource.
@@ -2194,9 +2244,11 @@ type EndpointReleaseBindingList struct {
 type EndpointReleaseBindingSpec struct {
 	// BackendOverrides Environment-specific values for the release's backends, matched by name
 	BackendOverrides *[]struct {
-		Name string `json:"name"`
+		// Mirror Copies a share of the requests the Endpoint splits by weight to this backend; its responses are discarded. Only on a backend at weight 0 without a match.
+		Mirror *EndpointMirror `json:"mirror,omitempty"`
+		Name   string          `json:"name"`
 
-		// Weight Replaces the release's weight for this backend in this environment, in backendRefs and in rules that split between several backends
+		// Weight Replaces the release's weight for this backend in this environment, its share of the requests no backend's match takes
 		Weight *int32 `json:"weight,omitempty"`
 	} `json:"backendOverrides,omitempty"`
 
@@ -3778,6 +3830,9 @@ type ResolvedEndpointBackend struct {
 
 	// Endpoint Workload endpoint name on the backend component
 	Endpoint *string `json:"endpoint,omitempty"`
+
+	// Mirror Copies a share of the requests the Endpoint splits by weight to this backend; its responses are discarded. Only on a backend at weight 0 without a match.
+	Mirror *EndpointMirror `json:"mirror,omitempty"`
 
 	// Name Backend name in the release
 	Name string `json:"name"`

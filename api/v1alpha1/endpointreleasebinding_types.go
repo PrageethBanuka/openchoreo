@@ -38,9 +38,9 @@ type EndpointReleaseBindingSpec struct {
 	EndpointTypeEnvironmentConfigs *runtime.RawExtension `json:"endpointTypeEnvironmentConfigs,omitempty"`
 
 	// BackendOverrides sets environment-specific values for the release's
-	// backends, matched by name. Today it sets a backend's weight, so each
-	// environment can run its own traffic split (a canary step, a blue/green
-	// switch) while the release stays the same.
+	// backends, matched by name: a backend's weight and its mirror share, so
+	// each environment can run its own traffic split while the release stays
+	// the same.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -55,14 +55,18 @@ type EndpointBackendOverride struct {
 	Name string `json:"name"`
 
 	// Weight replaces the release's weight for this backend in this
-	// environment, in spec.backendRefs and in every rule that names it, with
-	// the same semantics: relative to the other backends' weights, and 0 sends
-	// no traffic. It changes the split without cutting a new release;
-	// status.backends reports the effective weight.
+	// environment, with the same semantics: its share of the requests no
+	// backend's match takes, relative to the other backends' weights; 0 sends
+	// none. status.backends reports the effective weight.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1000000
 	Weight *int32 `json:"weight,omitempty"`
+
+	// Mirror replaces the release's mirror share for this backend in this
+	// environment. The backend must have a mirror in the release.
+	// +optional
+	Mirror *EndpointMirror `json:"mirror,omitempty"`
 }
 
 // EndpointReleaseBindingOwner identifies the endpoint this EndpointReleaseBinding belongs to.
@@ -187,6 +191,11 @@ type ResolvedEndpointBackend struct {
 	// Weight is the effective weight applied to this backend.
 	// +optional
 	Weight int32 `json:"weight,omitempty"`
+
+	// Mirror is the effective mirror share applied to this backend, when it is
+	// a mirror.
+	// +optional
+	Mirror *EndpointMirror `json:"mirror,omitempty"`
 
 	// ServiceURL is the URL of the Service the Endpoint renders for this backend
 	// in this environment.

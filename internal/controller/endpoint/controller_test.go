@@ -307,11 +307,28 @@ var _ = Describe("Endpoint Controller", func() {
 		Expect(cond.Reason).To(Equal(string(ReasonNoWeightedBackend)))
 	})
 
-	It("snapshots visibility into the release", func() {
+	It("refuses an empty match, and a mirror that also takes traffic", func() {
+		typeRef := cet("cet-match-invalid")
+		empty := componentBackend("anything", 0)
+		empty.Match = &openchoreov1alpha1.EndpointMatch{}
+		_, err := createEndpointWith("ep-match-empty", typeRef, external, componentBackend("anything", 1), empty)
+		Expect(err).To(MatchError(ContainSubstring("set a path, headers or cookies, or remove match")))
+
+		weighted := componentBackend("shadow", 5)
+		weighted.Mirror = &openchoreov1alpha1.EndpointMirror{Percent: 10}
+		_, err = createEndpointWith("ep-mirror-weighted", typeRef, external, componentBackend("anything", 1), weighted)
+		Expect(err).To(MatchError(ContainSubstring("set its weight to 0 and remove match")))
+	})
+
+	It("snapshots visibility and each backend's match into the release", func() {
 		createComponent("bg-blue", project)
 		createComponent("bg-green", project)
+		green := componentBackend("bg-green", 0)
+		green.Match = &openchoreov1alpha1.EndpointMatch{
+			Headers: []openchoreov1alpha1.EndpointHeaderMatch{{Name: "x-preview", Type: openchoreov1alpha1.EndpointHeaderMatchExact, Value: "green"}},
+		}
 		ep, err := createEndpointWith("ep-bluegreen", cet("cet-bluegreen"), external,
-			componentBackend("bg-blue", 100), componentBackend("bg-green", 0))
+			componentBackend("bg-blue", 100), green)
 		Expect(err).NotTo(HaveOccurred())
 		updated := reconcileAndGet(ep)
 		Expect(readyCondition(updated).Status).To(Equal(metav1.ConditionTrue))
@@ -320,6 +337,7 @@ var _ = Describe("Endpoint Controller", func() {
 		rel := &openchoreov1alpha1.EndpointRelease{}
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: updated.Status.LatestRelease.Name}, rel)).To(Succeed())
 		Expect(rel.Spec.Visibility).To(Equal(external))
+		Expect(rel.Spec.BackendRefs[1].Match).To(Equal(green.Match))
 	})
 
 	It("holds back a newer Endpoint routing a component in a visibility another Endpoint already routes it in", func() {

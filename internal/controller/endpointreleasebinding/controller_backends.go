@@ -37,6 +37,16 @@ type backendResolution struct {
 	unresolved []string
 }
 
+// byName returns the resolved backend with the given name.
+func (res *backendResolution) byName(name string) (endpointpipeline.Backend, bool) {
+	for _, b := range res.backends {
+		if b.Name == name {
+			return b, true
+		}
+	}
+	return endpointpipeline.Backend{}, false
+}
+
 // resolveBackends resolves each backendRef of the release for the binding's
 // environment. The Endpoint renders a Service per backend, so a component
 // backend resolves to what that Service needs, not to the component's own
@@ -62,6 +72,7 @@ func (r *Reconciler) resolveBackends(
 			ComponentName: component,
 			Endpoint:      endpoint,
 			Weight:        weight,
+			Mirror:        effectiveMirror(binding, ref),
 		}
 
 		backend, reason, err := r.resolveBackend(ctx, binding, in, md, ref.Name, component, endpoint)
@@ -107,23 +118,82 @@ func effectiveWeight(binding *openchoreov1alpha1.EndpointReleaseBinding, ref ope
 	return controller.EndpointBackendWeight(ref)
 }
 
-// buildRules builds the routing rules the type renders: the split of the
-// release's backends by their weight in this environment. A non-empty problem
+// effectiveMirror returns a backend's mirror share in the binding's
+// environment: the binding's override for it, or the release's. Nil when the
+// backend is not a mirror.
+func effectiveMirror(binding *openchoreov1alpha1.EndpointReleaseBinding, ref openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.EndpointMirror {
+	if ref.Mirror == nil {
+		return nil
+	}
+	if o := findOverride(binding, ref.Name); o != nil && o.Mirror != nil {
+		return o.Mirror.DeepCopy()
+	}
+	return ref.Mirror.DeepCopy()
+}
+
+// buildRules builds the routing rules the type renders, in order:
+//
+//   - one rule per backend with a match, in backendRefs order, sending every
+//     request it matches to that backend alone, whatever the weights;
+//   - the default rule, splitting every other request across the backends by
+//     their weight in this environment, and copying a share of them to each
+//     mirror backend.
+//
+// A matched or mirror backend that is not resolved here is left out; its
+// status entry says why, and the rest of the routing is unaffected, so a
+// release can be promoted ahead of its preview component. A non-empty problem
 // blocks rendering.
 func buildRules(
-	_ *openchoreov1alpha1.EndpointReleaseBinding,
-	_ *openchoreov1alpha1.EndpointRelease,
+	binding *openchoreov1alpha1.EndpointReleaseBinding,
+	release *openchoreov1alpha1.EndpointRelease,
 	res *backendResolution,
 ) (rules []endpointpipeline.Rule, problem string) {
 	if !hasWeight(res.backends) {
 		return nil, "No backend with a non-zero weight is available; check the weights in spec.backendOverrides"
 	}
-	return []endpointpipeline.Rule{{
+	mirrors := []endpointpipeline.Mirror{}
+	for _, ref := range release.Spec.BackendRefs {
+		b, ok := res.byName(ref.Name)
+		if !ok {
+			continue
+		}
+		if ref.Match != nil {
+			b.Weight = 1
+			rules = append(rules, endpointpipeline.Rule{
+				Name:     ref.Name,
+				Matches:  []endpointpipeline.Match{convertMatch(ref.Match)},
+				Backends: []endpointpipeline.Backend{b},
+				Mirrors:  []endpointpipeline.Mirror{},
+			})
+		}
+		if m := effectiveMirror(binding, ref); m != nil && m.Percent > 0 {
+			mirrors = append(mirrors, endpointpipeline.Mirror{Backend: b, Percent: m.Percent})
+		}
+	}
+	return append(rules, endpointpipeline.Rule{
 		Name:     defaultRuleName,
 		Matches:  []endpointpipeline.Match{},
 		Backends: res.backends,
-		Mirrors:  []endpointpipeline.Mirror{},
-	}}, ""
+		Mirrors:  mirrors,
+	}), ""
+}
+
+// convertMatch copies a backend's match into the render context, normalized
+// so every type renders it the same way.
+func convertMatch(m *openchoreov1alpha1.EndpointMatch) endpointpipeline.Match {
+	var path *endpointpipeline.PathMatch
+	if m.Path != nil {
+		path = &endpointpipeline.PathMatch{Type: string(m.Path.Type), Value: m.Path.Value}
+	}
+	headers := make([]endpointpipeline.HeaderMatch, 0, len(m.Headers))
+	for _, h := range m.Headers {
+		headers = append(headers, endpointpipeline.HeaderMatch{Name: h.Name, Type: string(h.Type), Value: h.Value})
+	}
+	cookies := make([]endpointpipeline.CookieMatch, 0, len(m.Cookies))
+	for _, c := range m.Cookies {
+		cookies = append(cookies, endpointpipeline.CookieMatch{Name: c.Name, Value: c.Value})
+	}
+	return endpointpipeline.NewMatch(path, headers, cookies)
 }
 
 func hasWeight(backends []endpointpipeline.Backend) bool {

@@ -162,9 +162,29 @@ type Rule struct {
 // Match is one set of conditions a request must all meet. Lists are never
 // nil, so templates can use them without has().
 type Match struct {
-	Headers     []HeaderMatch     `json:"headers"`
+	// Path is the path condition, relative to where the Endpoint is served;
+	// nil when the match has none. Templates join it to the prefix they serve
+	// the Endpoint at.
+	Path *PathMatch `json:"path,omitempty"`
+
+	// Conditions are the match's header conditions ready to render on any
+	// routing API: header names lowercased, and the cookie as a regular
+	// expression on the cookie header with its name and value escaped.
+	// Templates should render these rather than Headers and Cookies, so
+	// every mesh matches the same requests.
+	Conditions []HeaderMatch `json:"conditions"`
+
+	// Headers are the match's header conditions, names lowercased.
+	Headers []HeaderMatch `json:"headers"`
+	// Cookies are the match's cookie conditions as written; see Conditions.
 	Cookies     []CookieMatch     `json:"cookies"`
 	QueryParams []QueryParamMatch `json:"queryParams"`
+}
+
+// PathMatch is a path condition; Type is PathPrefix or Exact.
+type PathMatch struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
 }
 
 // HeaderMatch is a header condition; Type is Exact or RegularExpression.

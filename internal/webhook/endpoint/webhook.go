@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -96,6 +97,10 @@ func (v *Validator) validate(ctx context.Context, ep *openchoreodevv1alpha1.Endp
 			"every backend has weight 0, so the Endpoint would serve nothing; give at least one backend a weight above 0"))
 	}
 
+	if backends {
+		errs = append(errs, validateMatches(ep, spec)...)
+	}
+
 	typeErrs, err := v.validateTypeLimits(ctx, ep, spec)
 	if err != nil {
 		return err
@@ -115,6 +120,99 @@ func (v *Validator) validate(ctx context.Context, ep *openchoreodevv1alpha1.Endp
 	}
 	sort.Slice(errs, func(i, j int) bool { return errs[i].Field < errs[j].Field })
 	return apierrors.NewInvalid(openchoreodevv1alpha1.GroupVersion.WithKind("Endpoint").GroupKind(), ep.Name, errs)
+}
+
+// validateMatches rejects backend matches the data planes cannot express the
+// same way. Gateway API keeps only the first condition on a header, Istio keys
+// conditions by header name and Envoy ANDs them, so a header (names are
+// case-insensitive) may appear once per match, and a cookie, which renders on
+// the Cookie header, cannot sit next to a Cookie header condition. Header
+// patterns must compile as RE2, the engine Envoy, Istio and Cilium all use;
+// Go's regexp implements it. A path must mean the same on every proxy once
+// joined to the Endpoint's own path, so it has no empty, . or .. segments.
+// Two backends with the same match are refused: which of them gets the
+// request would depend on the data plane.
+func validateMatches(ep *openchoreodevv1alpha1.Endpoint, spec *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	owner := map[string]string{}
+	for i, ref := range ep.Spec.BackendRefs {
+		m := ref.Match
+		if m == nil {
+			continue
+		}
+		path := spec.Child("backendRefs").Index(i).Child("match")
+		if m.Path != nil {
+			if msg := pathProblem(m.Path.Value); msg != "" {
+				errs = append(errs, field.Invalid(path.Child("path", "value"), m.Path.Value, msg))
+			}
+		}
+		seen := map[string]bool{}
+		for k, h := range m.Headers {
+			name := strings.ToLower(h.Name)
+			if seen[name] {
+				errs = append(errs, field.Duplicate(path.Child("headers").Index(k).Child("name"), h.Name))
+			}
+			seen[name] = true
+			if name == "cookie" && len(m.Cookies) > 0 {
+				errs = append(errs, field.Invalid(path.Child("headers").Index(k).Child("name"), h.Name,
+					"match the cookie with cookies, or the Cookie header with headers, not both"))
+			}
+			if h.Type != openchoreodevv1alpha1.EndpointHeaderMatchRegularExpression {
+				continue
+			}
+			if _, err := regexp.Compile(h.Value); err != nil {
+				errs = append(errs, field.Invalid(path.Child("headers").Index(k).Child("value"), h.Value,
+					fmt.Sprintf("not a regular expression the data plane can run (RE2): %v", err)))
+			}
+		}
+		key := matchKey(m)
+		if first, dup := owner[key]; dup {
+			errs = append(errs, field.Invalid(path, "",
+				fmt.Sprintf("backend %q has the same match; give each backend a different match", first)))
+			continue
+		}
+		owner[key] = ref.Name
+	}
+	return errs
+}
+
+// pathProblem explains why a match path is not accepted, or returns "".
+func pathProblem(p string) string {
+	for _, seg := range strings.Split(p, "/")[1:] {
+		switch seg {
+		case ".", "..":
+			return "must not contain . or .. segments"
+		}
+	}
+	if strings.Contains(p, "//") {
+		return "must not contain //"
+	}
+	return ""
+}
+
+// matchKey identifies a match by its conditions, whatever their order and
+// the case of header names.
+func matchKey(m *openchoreodevv1alpha1.EndpointMatch) string {
+	var parts []string
+	if m.Path != nil {
+		t := m.Path.Type
+		if t == "" {
+			t = openchoreodevv1alpha1.EndpointPathMatchPathPrefix
+		}
+		parts = append(parts, "path\x00"+string(t)+"\x00"+m.Path.Value)
+	}
+	for _, h := range m.Headers {
+		t := h.Type
+		if t == "" {
+			t = openchoreodevv1alpha1.EndpointHeaderMatchExact
+		}
+		parts = append(parts, "header\x00"+strings.ToLower(h.Name)+"\x00"+string(t)+"\x00"+h.Value)
+	}
+	for _, c := range m.Cookies {
+		parts = append(parts, "cookie\x00"+c.Name+"\x00"+c.Value)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n")
 }
 
 // validateTypeLimits checks the hostname, backend kinds and parameters against

@@ -575,8 +575,8 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 
 		// rulesRelease renders one route rule per context rule, listing its
 		// backends by name with their weights, and its mirrors.
-		rulesRelease := func(name string, backendRefs ...openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.EndpointRelease {
-			rel := newRelease(name, backendRefs...)
+		rulesRelease := func(backendRefs ...openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.EndpointRelease {
+			rel := newRelease("rel-1", backendRefs...)
 			rel.Spec.EndpointType.Spec.Resources = []openchoreov1alpha1.ResourceTemplate{{
 				ID: "route",
 				Template: mustRaw(map[string]any{
@@ -585,7 +585,7 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 					"metadata":   map[string]any{"name": "${metadata.name}", "namespace": "${metadata.namespace}"},
 					"spec": map[string]any{
 						"rules": `${rules.map(r, {"name": r.name, "matches": size(r.matches), ` +
-							`"backends": r.backends.map(b, b.name + "=" + string(b.weight)), "mirrors": r.mirrors.map(m, m.backend.name)})}`,
+							`"backends": r.backends.map(b, b.name + "=" + string(b.weight)), "mirrors": r.mirrors.map(m, m.backend.name + "=" + string(m.percent))})}`,
 					},
 				}),
 			}}
@@ -602,11 +602,76 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 		It("renders one default rule that splits the backends by weight", func() {
 			binding := newBinding("rel-1")
 			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{{Name: "payments-v2", Weight: ptr.To[int32](30)}}
-			setup(rulesRelease("rel-1", refs...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+			setup(rulesRelease(refs...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
 			b := reconcileBinding()
 			Expect(renderedRules(b)).To(MatchJSON(`[
 				{"name":"default","matches":0,"backends":["payments-v1=90","payments-v2=30"],"mirrors":[]}
 			]`))
+		})
+
+		// withV2 returns refs with payments-v2 at weight 0, changed by edit.
+		withV2 := func(edit func(*openchoreov1alpha1.EndpointBackendRef)) []openchoreov1alpha1.EndpointBackendRef {
+			out := []openchoreov1alpha1.EndpointBackendRef{*refs[0].DeepCopy(), *refs[1].DeepCopy()}
+			out[1].Weight = ptr.To[int32](0)
+			edit(&out[1])
+			return out
+		}
+		preview := withV2(func(r *openchoreov1alpha1.EndpointBackendRef) {
+			r.Match = &openchoreov1alpha1.EndpointMatch{
+				Headers: []openchoreov1alpha1.EndpointHeaderMatch{{Name: "X-Preview", Value: "v2"}},
+			}
+		})
+		shadow := withV2(func(r *openchoreov1alpha1.EndpointBackendRef) {
+			r.Mirror = &openchoreov1alpha1.EndpointMirror{Percent: 100}
+		})
+
+		It("sends a backend's matched requests to it alone, ahead of the weighted split", func() {
+			binding := newBinding("rel-1")
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{
+				{Name: "payments-v1", Weight: ptr.To[int32](0)},
+				{Name: "payments-v2", Weight: ptr.To[int32](100)},
+			}
+			setup(rulesRelease(preview...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+			b := reconcileBinding()
+			Expect(renderedRules(b)).To(MatchJSON(`[
+				{"name":"payments-v2","matches":1,"backends":["payments-v2=1"],"mirrors":[]},
+				{"name":"default","matches":0,"backends":["payments-v1=0","payments-v2=100"],"mirrors":[]}
+			]`), "the overrides switch the split; the match keeps sending its requests to v2")
+		})
+
+		It("leaves out the match of a backend that is not deployed in the environment", func() {
+			setup(rulesRelease(preview...), newBinding("rel-1"), componentBinding("payments-v1"))
+			b := reconcileBinding()
+			Expect(condition(b, string(ConditionBackendsResolved)).Status).To(Equal(metav1.ConditionTrue))
+			Expect(renderedRules(b)).To(MatchJSON(`[
+				{"name":"default","matches":0,"backends":["payments-v1=90"],"mirrors":[]}
+			]`))
+			Expect(b.Status.Backends[1].Resolved).To(BeFalse())
+			Expect(b.Status.Backends[1].Reason).To(ContainSubstring("not deployed"))
+		})
+
+		It("copies the weighted split to a mirror backend, at the binding's share", func() {
+			binding := newBinding("rel-1")
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{
+				{Name: "payments-v2", Mirror: &openchoreov1alpha1.EndpointMirror{Percent: 10}},
+			}
+			setup(rulesRelease(shadow...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+			b := reconcileBinding()
+			Expect(renderedRules(b)).To(MatchJSON(`[
+				{"name":"default","matches":0,"backends":["payments-v1=90","payments-v2=0"],"mirrors":["payments-v2=10"]}
+			]`))
+			Expect(b.Status.Backends[1].Mirror).To(Equal(&openchoreov1alpha1.EndpointMirror{Percent: 10}))
+		})
+
+		It("refuses a mirror override on a backend that is not a mirror", func() {
+			binding := newBinding("rel-1")
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{
+				{Name: "payments-v1", Mirror: &openchoreov1alpha1.EndpointMirror{Percent: 10}},
+			}
+			setup(rulesRelease(shadow...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+			b := reconcileBinding()
+			Expect(condition(b, string(ConditionSynced)).Reason).To(Equal(string(ReasonBackendOverrideInvalid)))
+			Expect(condition(b, string(ConditionSynced)).Message).To(ContainSubstring("no mirror"))
 		})
 
 		It("reports no gateway URL for a mesh route", func() {

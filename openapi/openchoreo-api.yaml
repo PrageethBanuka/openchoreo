@@ -11967,6 +11967,75 @@ components:
           maximum: 1000000
           default: 1
           example: 90
+        match:
+          $ref: '#/components/schemas/EndpointMatch'
+        mirror:
+          $ref: '#/components/schemas/EndpointMirror'
+
+    EndpointMatch:
+      type: object
+      description: |
+        Conditions a request must all meet to go to this backend, whatever its weight.
+        Other requests are split by weight. The first backend whose match holds gets the request.
+      properties:
+        path:
+          type: object
+          required: [value]
+          description: Path relative to where the Endpoint is served (its path prefix at the gateway, the root of its Service in the mesh)
+          properties:
+            type:
+              type: string
+              enum: [PathPrefix, Exact]
+              default: PathPrefix
+            value:
+              type: string
+              pattern: '^/[^?#]*$'
+              maxLength: 1024
+              example: /next
+        headers:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name:
+                type: string
+                example: x-preview
+              type:
+                type: string
+                enum: [Exact, RegularExpression]
+                default: Exact
+              value:
+                type: string
+                example: green
+        cookies:
+          type: array
+          maxItems: 1
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name:
+                type: string
+                pattern: '^[A-Za-z0-9_-]{1,64}$'
+                example: exp_cartrecs
+              value:
+                type: string
+                pattern: '^[A-Za-z0-9_.-]{1,128}$'
+                example: b
+
+    EndpointMirror:
+      type: object
+      description: Copies a share of the requests the Endpoint splits by weight to this backend; its responses are discarded. Only on a backend at weight 0 without a match.
+      required: [percent]
+      properties:
+        percent:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 100
+          example: 10
 
     EndpointSchema:
       type: object
@@ -12283,7 +12352,9 @@ components:
                 format: int32
                 minimum: 0
                 maximum: 1000000
-                description: Replaces the release's weight for this backend in this environment, in backendRefs and in rules that split between several backends
+                description: Replaces the release's weight for this backend in this environment, its share of the requests no backend's match takes
+              mirror:
+                $ref: '#/components/schemas/EndpointMirror'
 
     ResolvedEndpointBackend:
       type: object
@@ -12309,6 +12380,8 @@ components:
           format: int32
           description: Effective weight applied to this backend
           example: 90
+        mirror:
+          $ref: '#/components/schemas/EndpointMirror'
         serviceURL:
           $ref: '#/components/schemas/EndpointURL'
         resolved:

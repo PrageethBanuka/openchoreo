@@ -34,6 +34,7 @@ type EndpointReleaseSpec struct {
 	// BackendRefs holds the snapshot of backend references and weights from the
 	// Endpoint spec at release time.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
 	// +listType=map
 	// +listMapKey=name
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`

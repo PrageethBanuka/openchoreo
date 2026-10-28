@@ -69,13 +69,28 @@ spec:
               backendOverrides:
                 description: |-
                   BackendOverrides sets environment-specific values for the release's
-                  backends, matched by name. Today it sets a backend's weight, so each
-                  environment can run its own traffic split (a canary step, a blue/green
-                  switch) while the release stays the same.
+                  backends, matched by name: a backend's weight and its mirror share, so
+                  each environment can run its own traffic split while the release stays
+                  the same.
                 items:
                   description: EndpointBackendOverride sets an environment-specific
                     value for one backend.
                   properties:
+                    mirror:
+                      description: |-
+                        Mirror replaces the release's mirror share for this backend in this
+                        environment. The backend must have a mirror in the release.
+                      properties:
+                        percent:
+                          description: Percent of the requests to copy, from 0 to
+                            100.
+                          format: int32
+                          maximum: 100
+                          minimum: 0
+                          type: integer
+                      required:
+                      - percent
+                      type: object
                     name:
                       description: Name is the backend's name in the release.
                       minLength: 1
@@ -83,10 +98,9 @@ spec:
                     weight:
                       description: |-
                         Weight replaces the release's weight for this backend in this
-                        environment, in spec.backendRefs and in every rule that names it, with
-                        the same semantics: relative to the other backends' weights, and 0 sends
-                        no traffic. It changes the split without cutting a new release;
-                        status.backends reports the effective weight.
+                        environment, with the same semantics: its share of the requests no
+                        backend's match takes, relative to the other backends' weights; 0 sends
+                        none. status.backends reports the effective weight.
                       format: int32
                       maximum: 1000000
                       minimum: 0
@@ -165,6 +179,21 @@ spec:
                       description: Endpoint is the name of the workload endpoint,
                         for a component backend.
                       type: string
+                    mirror:
+                      description: |-
+                        Mirror is the effective mirror share applied to this backend, when it is
+                        a mirror.
+                      properties:
+                        percent:
+                          description: Percent of the requests to copy, from 0 to
+                            100.
+                          format: int32
+                          maximum: 100
+                          minimum: 0
+                          type: integer
+                      required:
+                      - percent
+                      type: object
                     name:
                       description: Name is the backend's name in the release.
                       minLength: 1
