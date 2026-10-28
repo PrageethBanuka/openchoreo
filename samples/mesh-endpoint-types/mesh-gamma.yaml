@@ -14,6 +14,18 @@ metadata:
 spec:
   allowedBackendKinds:
     - Component
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      additionalProperties: false
+      properties:
+        requestTimeout:
+          type: string
+          description: >-
+            How long the mesh waits for a backend to answer a request in
+            this environment, as a Gateway API duration such as 10s or 1m.
+            Unset uses the mesh's default.
+          pattern: "^([0-9]{1,5}(h|m|s|ms)){1,4}$"
   validations:
     - rule: >-
         ${has(dataplane.annotations) && dataplane.annotations[?"openchoreo.dev/service-mesh"].orValue("") in ["istio", "cilium", "linkerd"]}
@@ -106,6 +118,7 @@ spec:
                   ? r.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
                       "backendRef": {"name": mi.backend.serviceName, "port": mi.backend.port}, "percent": mi.percent}})
                   : oc_omit(),
+                "timeouts": environmentConfigs.?requestTimeout.hasValue() ? {"request": environmentConfigs.requestTimeout} : oc_omit(),
                 "backendRefs": r.backends.filter(b, b.weight > 0)
                   .map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
               })}

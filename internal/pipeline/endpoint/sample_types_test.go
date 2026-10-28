@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
 
 	"github.com/openchoreo/openchoreo/api/v1alpha1"
@@ -352,4 +353,30 @@ func TestHTTP_ExactPathMatch(t *testing.T) {
 	assert.JSONEq(t, `[{"path":{"type":"Exact","value":"/trips-api/health"}}]`, jsonOf(t, rule["matches"]))
 	assert.JSONEq(t, `[{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplaceFullPath","replaceFullPath":"/health"}}}]`,
 		jsonOf(t, rule["filters"]), "an exact path is rewritten whole, keeping the matched path under the backend's base path")
+}
+
+func TestHTTP_RequestTimeoutPerEnvironment(t *testing.T) {
+	out, err := NewPipeline().Render(context.Background(), &RenderInput{
+		EndpointTypeSpec:   loadClusterEndpointType(t, httpSample),
+		Visibility:         external,
+		Backends:           sampleBackends(),
+		Rules:              sampleRules(),
+		EnvironmentConfigs: &runtime.RawExtension{Raw: []byte(`{"requestTimeout":"5s"}`)},
+		Metadata:           sampleMetadata(),
+		DataPlane:          sampleDataPlane(istio),
+		Environment:        sampleEnvironment(),
+	})
+	require.NoError(t, err)
+	entries := byID(out)
+	for _, id := range []string{"gateway-route-0", "mesh-route"} {
+		for _, r := range specOf(entries[id])["rules"].([]any) {
+			assert.JSONEq(t, `{"request":"5s"}`, jsonOf(t, r.(map[string]any)["timeouts"]), id)
+		}
+	}
+
+	out, err = renderSample(t, httpSample, external, nil, sampleRules())
+	require.NoError(t, err)
+	for _, r := range specOf(byID(out)["gateway-route-0"])["rules"].([]any) {
+		assert.NotContains(t, r.(map[string]any), "timeouts", "unset leaves the gateway default")
+	}
 }

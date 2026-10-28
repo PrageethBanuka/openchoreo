@@ -15,7 +15,8 @@ metadata:
       (path, headers, cookie) and mirrors render on every route.
       Requests are split once: by the gateway when it sits outside the mesh,
       or by the mesh when the DataPlane is annotated
-      openchoreo.dev/gateway-in-mesh: "true".
+      openchoreo.dev/gateway-in-mesh: "true". Each environment can set its
+      own request timeout (environmentConfigs.requestTimeout).
 spec:
   allowedHostnames:
     - "*.openchoreoapis.localhost"
@@ -35,6 +36,18 @@ spec:
           description: >-
             Hostname to serve instead of the environment's gateway host; must
             match allowedHostnames.
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      additionalProperties: false
+      properties:
+        requestTimeout:
+          type: string
+          description: >-
+            How long the gateway waits for a backend to answer a request in
+            this environment, as a Gateway API duration such as 10s or 1m.
+            Unset uses the gateway's default.
+          pattern: "^([0-9]{1,5}(h|m|s|ms)){1,4}$"
   validations:
     - rule: ${backends.all(b, b.protocol in ["HTTP", "GraphQL", "Websocket"])}
       message: http only routes HTTP, GraphQL and Websocket endpoints
@@ -163,6 +176,7 @@ spec:
                   "matches": [{"path": {"type": "PathPrefix", "value": parameters.?pathPrefix.orValue("/" + metadata.endpointName)}}],
                   "filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch",
                     "replacePrefixMatch": rules[size(rules) - 1].backends[0].basePath}}}],
+                  "timeouts": environmentConfigs.?requestTimeout.hasValue() ? {"request": environmentConfigs.requestTimeout} : oc_omit(),
                   "backendRefs": [{"name": metadata.endpointName, "port": 80}]
                 }]
               : rules.map(r, {
@@ -184,6 +198,7 @@ spec:
                           "replacePrefixMatch": r.backends[0].basePath}}}] +
                     r.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
                       "backendRef": {"name": mi.backend.serviceName, "port": mi.backend.port}, "percent": mi.percent}}),
+                  "timeouts": environmentConfigs.?requestTimeout.hasValue() ? {"request": environmentConfigs.requestTimeout} : oc_omit(),
                   "backendRefs": r.backends.filter(b, b.weight > 0)
                     .map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
                 })}
@@ -220,6 +235,7 @@ spec:
                   ? r.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
                       "backendRef": {"name": mi.backend.serviceName, "port": mi.backend.port}, "percent": mi.percent}})
                   : oc_omit(),
+                "timeouts": environmentConfigs.?requestTimeout.hasValue() ? {"request": environmentConfigs.requestTimeout} : oc_omit(),
                 "backendRefs": r.backends.filter(b, b.weight > 0)
                   .map(b, {"name": b.serviceName, "port": b.port, "weight": b.weight})
               })}
