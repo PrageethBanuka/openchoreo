@@ -19,21 +19,34 @@ Their Endpoints set `visibility: [namespace]`. To serve a gateway too, with the
 same split, use the `http` type: it composes the GAMMA route whenever the
 DataPlane has a mesh.
 
-## Rules
+## Routing by path, header or cookie
 
-Every type renders the Endpoint's `spec.rules` from `${rules}`. The binding
-controller resolves them for the environment, and always ends the list with a
-catch-all:
+A backendRef can carry a `match` and a `mirror`. The binding controller turns
+them into `${rules}` for the environment, and every type renders that list:
 
-- Rules are evaluated in order, and the first one that matches wins. A rule
-  matches on headers, a cookie (rendered as a regex on the Cookie header) or
-  query parameters. It sends the request to one or more backends by weight, and
-  can mirror a share of it to a backend, usually a weight-0 one.
-- Without a catch-all rule, unmatched requests follow `spec.backendRefs` by
-  weight.
-- A binding can change a backend's weight for its environment with
-  `spec.backendOverrides[].weight`, without cutting a new release. It applies
-  to backendRefs and to rules that split between several backends.
+- One rule per backend with a `match`, in `backendRefs` order. A request that
+  meets all of a match's conditions (a path, headers, a cookie) goes to that
+  backend alone, whatever the weights; when several backends match, the first
+  one wins. A backend at weight 0 with a match is a preview: only matching
+  requests reach it.
+- Then the default rule: every other request, split across the backends by
+  weight, with a copy of a share of it sent to each backend that has a
+  `mirror` (always a weight-0 backend without a match).
+- A binding changes a backend's weight or mirror share for its environment
+  with `spec.backendOverrides`, without cutting a new release. Only the default
+  rule changes; matches keep working.
+
+Each match comes ready to render. `m.conditions` holds its header conditions
+with names lowercased (Istio requires lowercase keys), the cookie as an
+escaped regular expression on the `cookie` header, and each header at most
+once. `m.path`, when set, is relative to where the Endpoint is served: the
+gateway route joins it to the Endpoint's path prefix, the mesh routes use it
+as is, and `m.path.regex` matches the same paths segment by segment for
+routing APIs whose prefix is a plain string prefix (Istio, Envoy). The
+Endpoint webhook refuses a header matched twice, a `cookie` header next to a
+cookie condition, header patterns RE2 can't compile, paths with empty, `.` or
+`..` segments, and two backends with the same match, so every mesh routes the
+same requests.
 
 A type refuses what its mesh can't render. Linkerd has no request mirroring,
 so `mesh-gamma` refuses mirrors on a Linkerd data plane.
@@ -51,8 +64,11 @@ so `mesh-gamma` refuses mirrors on a Linkerd data plane.
      needs a waypoint.
    - **Cilium:** install with `kubeProxyReplacement=true`,
      `envoyConfig.enabled=true`, `gatewayAPI.enabled=true` and `l7Proxy=true`.
-2. **Tell OpenChoreo which mesh the data plane runs.** The types check this
-   annotation and refuse to render without it:
+2. **Tell OpenChoreo which mesh the data plane runs.** `mesh-gamma`,
+   `cilium-cec` and the `http` type's mesh route check this annotation and
+   refuse to render without it. It is a convention of this branch, not yet an
+   OpenChoreo API. `istio-virtualservice` doesn't read it: installing that
+   type is the opt-in, so only install it on Istio data planes.
 
    ```yaml
    apiVersion: openchoreo.dev/v1alpha1
@@ -78,9 +94,10 @@ so `mesh-gamma` refuses mirrors on a Linkerd data plane.
 ## Example
 
 `orders` (v1) and `orders-v2` are two Components in project `shop`, each with an
-HTTP workload endpoint named `http`. In-cluster callers use the Endpoint's
-Service `orders-api`. 10% of its traffic goes to v2. Testers who send
-`x-canary: true` always reach v2, and 5% of requests are mirrored to v2:
+HTTP workload endpoint named `http`, and `orders-v3` is a rewrite nobody
+should depend on yet. In-cluster callers use the Endpoint's Service
+`orders-api`. 10% of its traffic goes to v2, testers who send `x-canary: true`
+always reach v2, and 5% of requests are copied to v3:
 
 ```yaml
 apiVersion: openchoreo.dev/v1alpha1
@@ -97,16 +114,18 @@ spec:
   visibility: [namespace]
   autoDeploy: true
   backendRefs:
-    - { name: stable, component: { name: orders, endpoint: http }, weight: 90 }
-    - { name: canary, component: { name: orders-v2, endpoint: http }, weight: 10 }
-  rules:
-    - name: testers
-      matches:
-        - headers: [{ name: x-canary, value: "true" }]
-      backends: [{ name: canary }]
-    - name: default
-      backends: [{ name: stable, weight: 90 }, { name: canary, weight: 10 }]
-      mirrors: [{ backend: canary, percent: 5 }]
+    - name: stable
+      component: { name: orders, endpoint: http }
+      weight: 90
+    - name: canary
+      component: { name: orders-v2, endpoint: http }
+      weight: 10
+      match:
+        headers: [{ name: x-canary, value: "true" }]
+    - name: shadow
+      component: { name: orders-v3, endpoint: http }
+      weight: 0
+      mirror: { percent: 5 }
 ---
 apiVersion: openchoreo.dev/v1alpha1
 kind: EndpointReleaseBinding
@@ -118,7 +137,9 @@ spec:
   environment: development
   endpointRelease: <the Endpoint's status.latestRelease.name>
   backendOverrides:
-    - { name: canary, weight: 50 }   # development runs 50/50; the release says 90/10
+    - { name: stable, weight: 50 }                # development runs 50/50; the release says 90/10
+    - { name: canary, weight: 50 }
+    - { name: shadow, mirror: { percent: 100 } }  # and copies every request to v3
 ```
 
 With `autoDeploy`, the Endpoint controller creates the binding for the
@@ -135,3 +156,13 @@ kubectl exec -n <data-plane namespace> <client pod> -- sh -c \
 Then send `-H 'x-canary: true'` and every answer should come from v2. Change
 `backendOverrides[].weight` on the binding, and the split moves without a new
 EndpointRelease.
+
+## Progressive delivery
+
+Canary, blue/green, A/B and mirror rollouts only edit the Endpoint's backends
+(their weights, matches and mirrors) and each environment's binding
+overrides, so they run unchanged on every type here. With `istio-virtualservice`, the split happens
+in the caller's sidecar: callers use the stable Service
+(`<endpoint>.<data-plane namespace>`) and need a sidecar, so enrol every
+environment's data-plane namespace (`istio-injection=enabled`), not just the
+first.

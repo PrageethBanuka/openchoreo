@@ -257,7 +257,7 @@ func TestRender_ExposesRulesAndVisibility(t *testing.T) {
 	rules := []Rule{
 		{
 			Name:     "preview",
-			Matches:  []Match{{Headers: []HeaderMatch{{Name: "x-preview", Type: "Exact", Value: "green"}}, Cookies: []CookieMatch{}, QueryParams: []QueryParamMatch{}}},
+			Matches:  []Match{{Headers: []HeaderMatch{{Name: "x-preview", Type: "Exact", Value: "green"}}, Cookies: []CookieMatch{}}},
 			Backends: fixtureBackends()[1:],
 			Mirrors:  []Mirror{},
 		},

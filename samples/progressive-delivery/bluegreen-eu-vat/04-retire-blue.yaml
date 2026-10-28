@@ -1,5 +1,5 @@
 # Step 4: green has held. Retire blue: the Endpoint now has only green, and
-# the preview rule is gone. Clear the binding's backendOverrides first; an
+# the preview match is gone. Clear the binding's backendOverrides first; an
 # override must name a backend of the release it is pinned to.
 apiVersion: openchoreo.dev/v1alpha1
 kind: Endpoint

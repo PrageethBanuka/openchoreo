@@ -177,14 +177,18 @@ type Match struct {
 	// Headers are the match's header conditions, names lowercased.
 	Headers []HeaderMatch `json:"headers"`
 	// Cookies are the match's cookie conditions as written; see Conditions.
-	Cookies     []CookieMatch     `json:"cookies"`
-	QueryParams []QueryParamMatch `json:"queryParams"`
+	Cookies []CookieMatch `json:"cookies"`
 }
 
 // PathMatch is a path condition; Type is PathPrefix or Exact.
 type PathMatch struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
+
+	// Regex is an RE2 pattern for the whole path that matches the same
+	// requests, for routing APIs whose prefix match is a plain string prefix
+	// (Istio, Envoy) rather than path segments as in Gateway API.
+	Regex string `json:"regex"`
 }
 
 // HeaderMatch is a header condition; Type is Exact or RegularExpression.
@@ -196,12 +200,6 @@ type HeaderMatch struct {
 
 // CookieMatch is an exact cookie condition.
 type CookieMatch struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// QueryParamMatch is an exact query parameter condition.
-type QueryParamMatch struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }

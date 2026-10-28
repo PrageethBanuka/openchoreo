@@ -17,9 +17,8 @@ spec:
     pathPrefix: /checkout
   backendRefs:
     - { name: checkout-blue, component: { name: checkout-blue, endpoint: http }, weight: 100 }
-    - { name: checkout-green, component: { name: checkout-green, endpoint: http }, weight: 0 }
-  rules:
-    - name: preview
-      matches:
-        - headers: [{ name: x-preview, value: green }]
-      backends: [{ name: checkout-green }]
+    - name: checkout-green
+      component: { name: checkout-green, endpoint: http }
+      weight: 0
+      match:
+        headers: [{ name: x-preview, value: green }]

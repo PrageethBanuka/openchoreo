@@ -22,8 +22,8 @@ happens upstream, as in
 
 | Step | What changes | What the audience sees |
 | --- | --- | --- |
-| 1. [`components.yaml`](components.yaml), [`01-experiment.yaml`](01-experiment.yaml) | Rule `group-b`: cookie `exp_cartrecs=b` → storefront-recs | Group b always gets recommendations, and group a never does |
-| 2. [`02-mobile-only.yaml`](02-mobile-only.yaml) (optional) | Rule `group-b-mobile`: the cookie AND a mobile User-Agent | Phones in group b get recommendations; desktops in group b don't |
+| 1. [`components.yaml`](components.yaml), [`01-experiment.yaml`](01-experiment.yaml) | Match on storefront-recs: cookie `exp_cartrecs=b` | Group b always gets recommendations, and group a never does |
+| 2. [`02-mobile-only.yaml`](02-mobile-only.yaml) (optional) | Match on storefront-recs: the cookie AND a mobile User-Agent | Phones in group b get recommendations; desktops in group b don't |
 | 3. [`03-ship-winner.yaml`](03-ship-winner.yaml) | storefront-recs only | Everyone gets recommendations |
 
 The first page view of a new visitor is served before the group is assigned;
@@ -32,9 +32,9 @@ every later view follows the cookie.
 ## What to point out
 
 - An A/B test routes on who the visitor is, not on a percentage of requests.
-- The conditions of one match must all hold, so "group b AND on a phone" is one
-  match. Separate matches are OR.
-- The same rule applies to in-cluster callers that carry the cookie.
+- The conditions of a match must all hold, so "group b AND on a phone" is one
+  match.
+- The same match applies to in-cluster callers that carry the cookie.
 
 ## References
 

@@ -13,7 +13,23 @@ const (
 	HeaderMatchExact             = "Exact"
 	HeaderMatchRegularExpression = "RegularExpression"
 	PathMatchPathPrefix          = "PathPrefix"
+	PathMatchExact               = "Exact"
 )
+
+// PathRegex is the regular expression that matches the same request paths as
+// a path condition: the path itself for Exact, and the path and every path
+// below it for PathPrefix, segment by segment, so /next does not match
+// /nextpage. The path is escaped.
+func PathRegex(matchType, path string) string {
+	if matchType == PathMatchExact {
+		return regexp.QuoteMeta(path)
+	}
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed == "" {
+		return "/.*"
+	}
+	return regexp.QuoteMeta(trimmed) + "(/.*)?"
+}
 
 // CookieRegex is the regular expression that matches a Cookie header
 // carrying name=value, wherever it sits among the other cookies. Name and
@@ -29,16 +45,16 @@ func CookieRegex(name, value string) string {
 // type is a PathPrefix.
 func NewMatch(path *PathMatch, headers []HeaderMatch, cookies []CookieMatch) Match {
 	m := Match{
-		Conditions:  make([]HeaderMatch, 0, len(headers)+len(cookies)),
-		Headers:     make([]HeaderMatch, 0, len(headers)),
-		Cookies:     make([]CookieMatch, 0, len(cookies)),
-		QueryParams: []QueryParamMatch{},
+		Conditions: make([]HeaderMatch, 0, len(headers)+len(cookies)),
+		Headers:    make([]HeaderMatch, 0, len(headers)),
+		Cookies:    make([]CookieMatch, 0, len(cookies)),
 	}
 	if path != nil {
-		p := *path
+		p := PathMatch{Type: path.Type, Value: path.Value}
 		if p.Type == "" {
 			p.Type = PathMatchPathPrefix
 		}
+		p.Regex = PathRegex(p.Type, p.Value)
 		m.Path = &p
 	}
 	for _, h := range headers {

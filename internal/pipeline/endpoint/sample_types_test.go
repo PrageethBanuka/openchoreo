@@ -52,15 +52,15 @@ func sampleBackends() []Backend {
 	return []Backend{backend("trips-python", 90), backend("trips-go", 10), backend("trips-shadow", 0)}
 }
 
-// sampleRules are a header rule, a cookie rule, and a catch-all that splits
-// 90/10 and mirrors 10% to the shadow, resolved as the binding controller
-// does.
+// sampleRules are a header rule, a cookie rule under /beta, and the default
+// rule that splits 90/10 and mirrors 10% to the shadow, resolved as the
+// binding controller does.
 func sampleRules() []Rule {
 	b := sampleBackends()
-	none := Match{Headers: []HeaderMatch{}, Cookies: []CookieMatch{}, QueryParams: []QueryParamMatch{}}
-	header, cookie := none, none
-	header.Headers = []HeaderMatch{{Name: "x-canary", Type: "Exact", Value: "true"}}
-	cookie.Cookies = []CookieMatch{{Name: "ab", Value: "b"}}
+	// Built as the controller does, so the templates get Conditions; the
+	// header is written in mixed case and renders lowercase.
+	header := NewMatch(nil, []HeaderMatch{{Name: "X-Canary", Value: "true"}}, nil)
+	cookie := NewMatch(&PathMatch{Value: "/beta"}, nil, []CookieMatch{{Name: "ab", Value: "b"}})
 	single := b[1]
 	single.Weight = 1
 	return []Rule{
@@ -134,11 +134,11 @@ var (
 )
 
 // meshRules is the mesh route of the trips Endpoint: the testers' header, the
-// cookie arm, then the 90/10 catch-all with a mirror.
+// cookie arm under /beta, then the 90/10 default rule with a mirror.
 const meshRules = `[
 	{"matches":[{"headers":[{"type":"Exact","name":"x-canary","value":"true"}]}],
 	 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
-	{"matches":[{"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}]}],
+	{"matches":[{"path":{"type":"PathPrefix","value":"/beta"},"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}]}],
 	 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
 	{"filters":[{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"e-trips-api-dev-trips-shadow","port":80},"percent":10}}],
 	 "backendRefs":[{"name":"e-trips-api-dev-trips-python","port":80,"weight":90},{"name":"e-trips-api-dev-trips-go","port":80,"weight":10}]}
@@ -178,8 +178,8 @@ func TestHTTP_ServicesAndGatewayRouteWithoutMesh(t *testing.T) {
 		{"matches":[{`+path+`,"headers":[{"type":"Exact","name":"x-canary","value":"true"}]}],
 		 "filters":[`+rewrite+`],
 		 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
-		{"matches":[{`+path+`,"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}]}],
-		 "filters":[`+rewrite+`],
+		{"matches":[{"path":{"type":"PathPrefix","value":"/trips-api/beta"},"headers":[{"type":"RegularExpression","name":"cookie","value":"(.*;\\s*)?ab=b(;.*)?"}]}],
+		 "filters":[{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplacePrefixMatch","replacePrefixMatch":"/beta"}}}],
 		 "backendRefs":[{"name":"e-trips-api-dev-trips-go","port":80,"weight":1}]},
 		{"matches":[{`+path+`}],
 		 "filters":[`+rewrite+`,{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"e-trips-api-dev-trips-shadow","port":80},"percent":10}}],
@@ -253,6 +253,11 @@ func TestMeshSamples_Refusals(t *testing.T) {
 	for _, file := range []string{"mesh-gamma.yaml", "istio-virtualservice.yaml", "cilium-cec.yaml"} {
 		t.Run(file+": no mesh", func(t *testing.T) {
 			_, err := renderSample(t, filepath.Join(meshSamplesDir, file), namespaceOnly, nil, sampleRules())
+			if file == "istio-virtualservice.yaml" {
+				// Installing the type is the opt-in; it reads no annotation.
+				require.NoError(t, err)
+				return
+			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "openchoreo.dev/service-mesh")
 		})
@@ -283,7 +288,7 @@ func TestIstioVirtualService_RulesAndMirror(t *testing.T) {
 	assert.JSONEq(t, `[
 		{"name":"testers","match":[{"headers":{"x-canary":{"exact":"true"}}}],
 		 "route":[{"destination":`+dest("trips-go")+`,"weight":1}]},
-		{"name":"arm-b","match":[{"headers":{"cookie":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}}],
+		{"name":"arm-b","match":[{"uri":{"regex":"/beta(/.*)?"},"headers":{"cookie":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}}],
 		 "route":[{"destination":`+dest("trips-go")+`,"weight":1}]},
 		{"name":"default",
 		 "route":[{"destination":`+dest("trips-python")+`,"weight":90},{"destination":`+dest("trips-go")+`,"weight":10}],
@@ -310,11 +315,41 @@ func TestCiliumEnvoyConfig_RulesAndMirror(t *testing.T) {
 	assert.JSONEq(t, `[
 		{"match":{"prefix":"/","headers":[{"name":"x-canary","string_match":{"exact":"true"}}]},
 		 "route":{"weighted_clusters":{"clusters":[{"name":"`+cluster("trips-go")+`","weight":1}]}}},
-		{"match":{"prefix":"/","headers":[{"name":"cookie","string_match":{"safe_regex":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}}]},
+		{"match":{"safe_regex":{"regex":"/beta(/.*)?"},"headers":[{"name":"cookie","string_match":{"safe_regex":{"regex":"(.*;\\s*)?ab=b(;.*)?"}}}]},
 		 "route":{"weighted_clusters":{"clusters":[{"name":"`+cluster("trips-go")+`","weight":1}]}}},
 		{"match":{"prefix":"/"},
 		 "route":{
 		   "weighted_clusters":{"clusters":[{"name":"`+cluster("trips-python")+`","weight":90},{"name":"`+cluster("trips-go")+`","weight":10}]},
 		   "request_mirror_policies":[{"cluster":"`+cluster("trips-shadow")+`","runtime_fraction":{"default_value":{"numerator":10,"denominator":"HUNDRED"}}}]}}
 	]`, jsonOf(t, routes))
+}
+
+// TestIstioVirtualService_PortalRollouts renders the rules the portal writes
+// for each strategy: lowercase header keys (Istio requires them), the A/B
+// cookie plus an app header in one match, and an escaped cookie value.
+func TestIstioVirtualService_PortalRollouts(t *testing.T) {
+	rules := sampleRules()
+	rules[1].Matches = []Match{NewMatch(
+		nil,
+		[]HeaderMatch{{Name: "X-Client", Value: "ios"}},
+		[]CookieMatch{{Name: "exp_cartrecs", Value: "b.1"}},
+	)}
+	out, err := renderSample(t, filepath.Join(meshSamplesDir, "istio-virtualservice.yaml"), namespaceOnly, nil, rules)
+	require.NoError(t, err)
+	http := specOf(byID(out)["virtual-service"])["http"].([]any)
+	assert.JSONEq(t, `[{"headers":{
+		"x-client":{"exact":"ios"},
+		"cookie":{"regex":"(.*;\\s*)?exp_cartrecs=b\\.1(;.*)?"}}}]`,
+		jsonOf(t, http[1].(map[string]any)["match"]))
+}
+
+func TestHTTP_ExactPathMatch(t *testing.T) {
+	rules := sampleRules()
+	rules[1].Matches = []Match{NewMatch(&PathMatch{Type: PathMatchExact, Value: "/health"}, nil, nil)}
+	out, err := renderSample(t, httpSample, external, nil, rules)
+	require.NoError(t, err)
+	rule := specOf(byID(out)["gateway-route-0"])["rules"].([]any)[1].(map[string]any)
+	assert.JSONEq(t, `[{"path":{"type":"Exact","value":"/trips-api/health"}}]`, jsonOf(t, rule["matches"]))
+	assert.JSONEq(t, `[{"type":"URLRewrite","urlRewrite":{"path":{"type":"ReplaceFullPath","replaceFullPath":"/health"}}}]`,
+		jsonOf(t, rule["filters"]), "an exact path is rewritten whole, keeping the matched path under the backend's base path")
 }

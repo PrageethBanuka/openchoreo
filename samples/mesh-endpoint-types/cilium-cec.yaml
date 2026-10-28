@@ -7,7 +7,7 @@ metadata:
       Serves an Endpoint to in-cluster (east-west) callers through Cilium's
       per-node Envoy. Emits a stable Service named after the Endpoint and one
       Service per backend, and a CiliumEnvoyConfig that redirects the stable
-      Service and applies the Endpoint's rules, split and mirrors. Needs Cilium
+      Service and applies the backends' matches, split and mirrors. Needs Cilium
       with kubeProxyReplacement=true and envoyConfig.enabled=true, and a
       DataPlane annotated openchoreo.dev/service-mesh=cilium.
 spec:
@@ -27,7 +27,7 @@ spec:
       message: cilium-cec only routes HTTP, GraphQL and Websocket endpoints
   resources:
     # The stable Service: the Endpoint's in-cluster address, selecting the
-    # primary backend (the highest weight in the catch-all rule). The mesh
+    # primary backend (the highest weight in the default rule). The mesh
     # routes its traffic.
     - id: stable-service
       targetPlane: dataplane
@@ -91,7 +91,7 @@ spec:
               namespace: ${metadata.namespace}
           backendServices: |
             ${backends.map(b, {"name": b.serviceName, "namespace": b.namespace})}
-          # A listener, its routes (one per rule match, in order; the catch-all
+          # A listener, its routes (one per rule match, in order; the default rule
           # last), and one EDS cluster per backend named <namespace>/<service>,
           # the name Cilium syncs endpoints under.
           resources: |
@@ -113,19 +113,22 @@ spec:
                 "virtual_hosts": [{
                   "name": metadata.name,
                   "domains": ["*"],
-                  "routes": rules.map(r, (size(r.matches) > 0 ? r.matches : [{"headers": [], "cookies": [], "queryParams": []}]).map(m, {
-                      "match": {
-                        "prefix": "/",
-                        "headers": size(m.headers) + size(m.cookies) > 0
-                          ? m.headers.map(h, {"name": h.name, "string_match":
-                              h.type == "Exact" ? {"exact": h.value} : {"safe_regex": {"regex": h.value}}}) +
-                            m.cookies.map(c, {"name": "cookie", "string_match":
-                              {"safe_regex": {"regex": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"}}})
-                          : oc_omit(),
-                        "query_parameters": size(m.queryParams) > 0
-                          ? m.queryParams.map(q, {"name": q.name, "string_match": {"exact": q.value}})
-                          : oc_omit()
-                      },
+                  "routes": rules.map(r, (size(r.matches) > 0 ? r.matches : [{"conditions": []}]).map(m, {
+                      "match": has(m.path)
+                        ? {
+                            "safe_regex": {"regex": m.path.regex},
+                            "headers": size(m.conditions) > 0
+                              ? m.conditions.map(h, {"name": h.name, "string_match":
+                                  h.type == "Exact" ? {"exact": h.value} : {"safe_regex": {"regex": h.value}}})
+                              : oc_omit()
+                          }
+                        : {
+                            "prefix": "/",
+                            "headers": size(m.conditions) > 0
+                              ? m.conditions.map(h, {"name": h.name, "string_match":
+                                  h.type == "Exact" ? {"exact": h.value} : {"safe_regex": {"regex": h.value}}})
+                              : oc_omit()
+                          },
                       "route": {
                         "weighted_clusters": {"clusters": r.backends.filter(b, b.weight > 0)
                           .map(b, {"name": b.namespace + "/" + b.serviceName, "weight": b.weight})},

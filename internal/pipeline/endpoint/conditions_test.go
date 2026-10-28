@@ -37,6 +37,19 @@ func TestCookieRegex(t *testing.T) {
 	}
 }
 
+func TestPathRegex(t *testing.T) {
+	prefix := PathRegex(PathMatchPathPrefix, "/v1.2/")
+	for _, p := range []string{"/v1.2", "/v1.2/", "/v1.2/orders"} {
+		assert.True(t, fullMatch(prefix, p), p)
+	}
+	for _, p := range []string{"/v1x2", "/v1.2orders", "/"} {
+		assert.False(t, fullMatch(prefix, p), p)
+	}
+	assert.True(t, fullMatch(PathRegex(PathMatchPathPrefix, "/"), "/anything"))
+	assert.True(t, fullMatch(PathRegex(PathMatchExact, "/v1.2"), "/v1.2"))
+	assert.False(t, fullMatch(PathRegex(PathMatchExact, "/v1.2"), "/v1.2/orders"))
+}
+
 func TestNewMatch(t *testing.T) {
 	m := NewMatch(
 		&PathMatch{Value: "/next"},
@@ -54,12 +67,11 @@ func TestNewMatch(t *testing.T) {
 	}, m.Conditions)
 	assert.Equal(t, "x-client", m.Headers[0].Name)
 	assert.Equal(t, []CookieMatch{{Name: "exp_cartrecs", Value: "b"}}, m.Cookies)
-	assert.Equal(t, &PathMatch{Type: PathMatchPathPrefix, Value: "/next"}, m.Path)
+	assert.Equal(t, &PathMatch{Type: PathMatchPathPrefix, Value: "/next", Regex: `/next(/.*)?`}, m.Path)
 
 	empty := NewMatch(nil, nil, nil)
 	assert.Nil(t, empty.Path)
 	assert.NotNil(t, empty.Conditions)
 	assert.NotNil(t, empty.Headers)
 	assert.NotNil(t, empty.Cookies)
-	assert.NotNil(t, empty.QueryParams)
 }

@@ -23,17 +23,17 @@ This is Martin Fowler's
 
 | Step | What changes | What the audience sees |
 | --- | --- | --- |
-| 1. [`components.yaml`](components.yaml), [`01-preview.yaml`](01-preview.yaml) | Blue at 100, green at 0; rule `preview`: `x-preview: green` → green | Buyers pay 21% (NL). With the header, 19% (DE) |
+| 1. [`components.yaml`](components.yaml), [`01-preview.yaml`](01-preview.yaml) | Blue at 100, green at 0 with a match: `x-preview: green` → green | Buyers pay 21% (NL). With the header, 19% (DE) |
 | 2. [`02-switch.yaml`](02-switch.yaml) | The binding's overrides: blue 0, green 100 | Everyone pays 19%, on both paths, at once |
 | 3. [`03-rollback.yaml`](03-rollback.yaml) | Blue 100, green 0 | Back to 21% in seconds; the preview still reaches green |
 | 4. [`04-retire-blue.yaml`](04-retire-blue.yaml) | Green only, blue deleted | Done |
 
 ## What to point out
 
-- The preview is a rule, so it works in production without a separate URL.
+- The preview is a match on green, so it works in production without a separate URL.
 - The switch and the rollback edit the binding: no release, no redeploy.
-- A single-backend rule ignores weights, so the preview keeps working whichever
-  way the switch points.
+- A match ignores weights, so the preview keeps working whichever way the
+  switch points.
 - The stable Service follows the primary backend, so in-cluster callers outside
   a mesh switch too.
 

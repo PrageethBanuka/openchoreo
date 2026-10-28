@@ -7,7 +7,7 @@ metadata:
       Serves an Endpoint to in-cluster (east-west) callers through the service
       mesh. Emits a stable Service named after the Endpoint and one Service per
       backend, and a Gateway API mesh (GAMMA) HTTPRoute on the stable Service
-      that applies the Endpoint's rules and split. Works on Istio (ambient with
+      that applies the backends' matches and split. Works on Istio (ambient with
       a waypoint, or sidecars), Cilium 1.16+ and Linkerd 2.14+; the DataPlane
       names its mesh with the openchoreo.dev/service-mesh annotation. Linkerd
       does not support mirroring.
@@ -32,7 +32,7 @@ spec:
       message: Linkerd does not support request mirroring; remove the mirrors on this data plane
   resources:
     # The stable Service: the Endpoint's in-cluster address, selecting the
-    # primary backend (the highest weight in the catch-all rule). The mesh
+    # primary backend (the highest weight in the default rule). The mesh
     # routes its traffic.
     - id: stable-service
       targetPlane: dataplane
@@ -90,19 +90,15 @@ spec:
               kind: Service
               name: ${metadata.endpointName}
               port: 80
-          # One rule per Endpoint rule, in order; the last is the catch-all.
+          # One rule per matched backend, in order, then the default split.
           # Cookies match as a regex on the Cookie header.
           rules: |
             ${rules.map(r, {
                 "matches": size(r.matches) > 0
                   ? r.matches.map(m, {
-                      "headers": size(m.headers) + size(m.cookies) > 0
-                        ? m.headers.map(h, {"type": h.type, "name": h.name, "value": h.value}) +
-                          m.cookies.map(c, {"type": "RegularExpression", "name": "cookie",
-                            "value": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"})
-                        : oc_omit(),
-                      "queryParams": size(m.queryParams) > 0
-                        ? m.queryParams.map(q, {"type": "Exact", "name": q.name, "value": q.value})
+                      "path": has(m.path) ? {"type": m.path.type, "value": m.path.value} : oc_omit(),
+                      "headers": size(m.conditions) > 0
+                        ? m.conditions.map(h, {"type": h.type, "name": h.name, "value": h.value})
                         : oc_omit()
                     })
                   : oc_omit(),

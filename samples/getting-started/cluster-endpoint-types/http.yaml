@@ -11,8 +11,8 @@ metadata:
       route for each external or internal visibility, with a NetworkPolicy
       that lets those gateways reach the backends, and a mesh (GAMMA) route
       on the stable Service when the DataPlane has the
-      openchoreo.dev/service-mesh annotation. The Endpoint's rules (header,
-      cookie and query matches, weights, mirrors) render on every route.
+      openchoreo.dev/service-mesh annotation. The backends' weights, matches
+      (path, headers, cookie) and mirrors render on every route.
       Requests are split once: by the gateway when it sits outside the mesh,
       or by the mesh when the DataPlane is annotated
       openchoreo.dev/gateway-in-mesh: "true".
@@ -49,7 +49,7 @@ spec:
       message: Linkerd does not support request mirroring; remove the mirrors on this data plane
   resources:
     # The stable Service: the Endpoint's in-cluster address. It selects the
-    # primary backend (the highest weight in the catch-all rule), so callers
+    # primary backend (the highest weight in the default rule), so callers
     # outside a mesh reach a safe version; with a mesh it is the parent of the
     # mesh route, which splits its traffic.
     - id: stable-service
@@ -152,7 +152,7 @@ spec:
               .map(h, metadata.environmentName + "-" + metadata.endpointNamespace + "." + h)}
           # With the gateway in the mesh, the gateway forwards to the stable
           # Service and the mesh route splits, so each request is split once.
-          # Otherwise the gateway splits by the Endpoint's rules itself; the
+          # Otherwise the gateway routes by the backends' matches and splits itself; the
           # Cookie header is matched with a regex, and each rule rewrites the
           # path prefix to its backends' base path.
           rules: |
@@ -166,19 +166,22 @@ spec:
                   "backendRefs": [{"name": metadata.endpointName, "port": 80}]
                 }]
               : rules.map(r, {
-                  "matches": (size(r.matches) > 0 ? r.matches : [{"headers": [], "cookies": [], "queryParams": []}]).map(m, {
-                    "path": {"type": "PathPrefix", "value": parameters.?pathPrefix.orValue("/" + metadata.endpointName)},
-                    "headers": size(m.headers) + size(m.cookies) > 0
-                      ? m.headers.map(h, {"type": h.type, "name": h.name, "value": h.value}) +
-                        m.cookies.map(c, {"type": "RegularExpression", "name": "cookie",
-                          "value": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"})
-                      : oc_omit(),
-                    "queryParams": size(m.queryParams) > 0
-                      ? m.queryParams.map(q, {"type": "Exact", "name": q.name, "value": q.value})
+                  "matches": (size(r.matches) > 0 ? r.matches : [{"conditions": []}]).map(m, {
+                    "path": has(m.path)
+                      ? {"type": m.path.type, "value": (parameters.?pathPrefix.orValue("/" + metadata.endpointName) == "/" ? "" : parameters.?pathPrefix.orValue("/" + metadata.endpointName)) + m.path.value}
+                      : {"type": "PathPrefix", "value": parameters.?pathPrefix.orValue("/" + metadata.endpointName)},
+                    "headers": size(m.conditions) > 0
+                      ? m.conditions.map(h, {"type": h.type, "name": h.name, "value": h.value})
                       : oc_omit()
                   }),
-                  "filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch",
-                      "replacePrefixMatch": r.backends[0].basePath}}}] +
+                  "filters": [size(r.matches) > 0 && has(r.matches[0].path)
+                      ? {"type": "URLRewrite", "urlRewrite": {"path": r.matches[0].path.type == "Exact"
+                          ? {"type": "ReplaceFullPath", "replaceFullPath":
+                              (r.backends[0].basePath == "/" ? "" : r.backends[0].basePath) + r.matches[0].path.value}
+                          : {"type": "ReplacePrefixMatch", "replacePrefixMatch":
+                              (r.backends[0].basePath == "/" ? "" : r.backends[0].basePath) + r.matches[0].path.value}}}
+                      : {"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch",
+                          "replacePrefixMatch": r.backends[0].basePath}}}] +
                     r.mirrors.map(mi, {"type": "RequestMirror", "requestMirror": {
                       "backendRef": {"name": mi.backend.serviceName, "port": mi.backend.port}, "percent": mi.percent}}),
                   "backendRefs": r.backends.filter(b, b.weight > 0)
@@ -207,13 +210,9 @@ spec:
             ${rules.map(r, {
                 "matches": size(r.matches) > 0
                   ? r.matches.map(m, {
-                      "headers": size(m.headers) + size(m.cookies) > 0
-                        ? m.headers.map(h, {"type": h.type, "name": h.name, "value": h.value}) +
-                          m.cookies.map(c, {"type": "RegularExpression", "name": "cookie",
-                            "value": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"})
-                        : oc_omit(),
-                      "queryParams": size(m.queryParams) > 0
-                        ? m.queryParams.map(q, {"type": "Exact", "name": q.name, "value": q.value})
+                      "path": has(m.path) ? {"type": m.path.type, "value": m.path.value} : oc_omit(),
+                      "headers": size(m.conditions) > 0
+                        ? m.conditions.map(h, {"type": h.type, "name": h.name, "value": h.value})
                         : oc_omit()
                     })
                   : oc_omit(),

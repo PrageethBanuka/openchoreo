@@ -15,15 +15,15 @@ callers.
 - **One Endpoint, several components.** The Endpoint lists each version as a
   backend (`spec.backendRefs`) with a weight. A canary adds a backend; it doesn't
   need a new Endpoint.
-- **Rules for header, cookie and query routing.** `spec.rules` match requests in
-  order and send them to backends by weight. They can also mirror a share of
-  requests. The last rule may have no matches: it is the catch-all. Without
-  one, unmatched requests follow `backendRefs`.
+- **Path, header and cookie routing on a backend.** A backend's `match` sends
+  every request that meets all of its conditions to that backend, whatever the
+  weights; everything else is split by weight. A backend at weight 0 with a
+  match is a preview. A backend's `mirror` copies a share of the split to it
+  and discards its answers.
 - **Per-environment weights without a release.** A binding's
-  `spec.backendOverrides[].weight` changes the split in one environment, in
-  seconds, and cuts no new release. It applies to `backendRefs` and to rules
-  that split between several backends. A single-backend rule, such as a
-  preview header, keeps working while the catch-all is switched or rolled back.
+  `spec.backendOverrides` changes a backend's weight or mirror share in one
+  environment, in seconds, and cuts no new release. Matches keep working while
+  the split is switched or rolled back.
 - **One split for every path.** The `http` ClusterEndpointType emits a stable
   Service named after the Endpoint, one Service per backend, a gateway route per
   visibility (with a NetworkPolicy letting that gateway reach the backends), and

@@ -7,19 +7,16 @@ metadata:
       Serves an Endpoint to in-cluster (east-west) callers through an Istio
       sidecar mesh. Emits a stable Service named after the Endpoint and one
       Service per backend, and a VirtualService on the stable Service's host
-      that applies the Endpoint's rules, split and mirrors. Needs a DataPlane
-      annotated openchoreo.dev/service-mesh=istio and sidecars on the callers.
-      In ambient mode, use mesh-gamma instead: VirtualService on waypoints is
+      that applies the backends' matches, split and mirrors, including the
+      canary, blue/green and A/B rollouts the portal runs. Install it only on
+      data planes running Istio with sidecars on the callers; without Istio
+      the VirtualService fails to apply and the binding reports it. In
+      ambient mode, use mesh-gamma instead: VirtualService on waypoints is
       Alpha.
 spec:
   allowedBackendKinds:
     - Component
   validations:
-    - rule: >-
-        ${has(dataplane.annotations) && dataplane.annotations[?"openchoreo.dev/service-mesh"].orValue("") == "istio"}
-      message: >-
-        istio-virtualservice needs Istio on the data plane: annotate the
-        DataPlane with openchoreo.dev/service-mesh=istio
     - rule: ${visibility == ["namespace"]}
       message: >-
         istio-virtualservice serves in-cluster callers only; set spec.visibility to
@@ -28,7 +25,7 @@ spec:
       message: istio-virtualservice only routes HTTP, GraphQL and Websocket endpoints
   resources:
     # The stable Service: the Endpoint's in-cluster address, selecting the
-    # primary backend (the highest weight in the catch-all rule). The mesh
+    # primary backend (the highest weight in the default rule). The mesh
     # routes its traffic.
     - id: stable-service
       targetPlane: dataplane
@@ -83,23 +80,22 @@ spec:
         spec:
           hosts:
             - ${metadata.endpointName + "." + metadata.namespace + ".svc.cluster.local"}
-          # One route per Endpoint rule, in order (first match wins). Cookies
-          # match as a regex on the Cookie header; Istio matches headers and
-          # query parameters by name.
+          # One route per rule: each matched backend in order, then the default split (first match wins). The
+          # controller hands over each match's conditions ready to render:
+          # header names lowercased, as Istio requires, the cookie as an
+          # escaped regex on the cookie header, and each header at most once,
+          # so they map onto Istio's headers map without clashes. A path is
+          # matched with its regex, because Istio's prefix is a plain string
+          # prefix and /next would also match /nextpage.
           http: |
             ${rules.map(r, {
                 "name": r.name,
                 "match": size(r.matches) > 0
                   ? r.matches.map(m, {
-                      "headers": size(m.headers) + size(m.cookies) > 0
-                        ? oc_merge(
-                            m.headers.transformMapEntry(i, h,
-                              {h.name: h.type == "Exact" ? {"exact": h.value} : {"regex": h.value}}),
-                            m.cookies.transformMapEntry(i, c,
-                              {"cookie": {"regex": "(.*;\\s*)?" + c.name + "=" + c.value + "(;.*)?"}}))
-                        : oc_omit(),
-                      "queryParams": size(m.queryParams) > 0
-                        ? m.queryParams.transformMapEntry(i, q, {q.name: {"exact": q.value}})
+                      "uri": has(m.path) ? {"regex": m.path.regex} : oc_omit(),
+                      "headers": size(m.conditions) > 0
+                        ? m.conditions.transformMapEntry(i, h,
+                            {h.name: h.type == "Exact" ? {"exact": h.value} : {"regex": h.value}})
                         : oc_omit()
                     })
                   : oc_omit(),
