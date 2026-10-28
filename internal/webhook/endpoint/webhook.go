@@ -72,7 +72,6 @@ func (v *Validator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.O
 		return nil, nil
 	}
 	backendsChanged := !equality.Semantic.DeepEqual(ep.Spec.BackendRefs, oldEp.Spec.BackendRefs) ||
-		!equality.Semantic.DeepEqual(ep.Spec.Rules, oldEp.Spec.Rules) ||
 		!equality.Semantic.DeepEqual(ep.Spec.Parameters, oldEp.Spec.Parameters)
 	claimsChanged := !equality.Semantic.DeepEqual(ep.Spec.BackendRefs, oldEp.Spec.BackendRefs) ||
 		!equality.Semantic.DeepEqual(ep.Spec.Visibility, oldEp.Spec.Visibility) ||
@@ -92,7 +91,7 @@ func (v *Validator) validate(ctx context.Context, ep *openchoreodevv1alpha1.Endp
 	var errs field.ErrorList
 	spec := field.NewPath("spec")
 
-	if backends && len(ep.Spec.BackendRefs) > 0 && !hasCatchAllRule(ep) && !hasWeightedBackend(ep.Spec.BackendRefs) {
+	if backends && len(ep.Spec.BackendRefs) > 0 && !hasWeightedBackend(ep.Spec.BackendRefs) {
 		errs = append(errs, field.Invalid(spec.Child("backendRefs"), "",
 			"every backend has weight 0, so the Endpoint would serve nothing; give at least one backend a weight above 0"))
 	}
@@ -257,11 +256,4 @@ func parameterHostname(ep *openchoreodevv1alpha1.Endpoint) string {
 		return ""
 	}
 	return params.Hostname
-}
-
-// hasCatchAllRule reports whether the Endpoint's last rule has no matches, so
-// its weights, not backendRefs', split the unmatched traffic.
-func hasCatchAllRule(ep *openchoreodevv1alpha1.Endpoint) bool {
-	n := len(ep.Spec.Rules)
-	return n > 0 && len(ep.Spec.Rules[n-1].Matches) == 0
 }

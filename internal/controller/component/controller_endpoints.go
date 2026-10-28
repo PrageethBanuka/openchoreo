@@ -75,7 +75,6 @@ func (r *Reconciler) pruneFromEndpoints(ctx context.Context, comp *openchoreov1a
 		default:
 			patch := client.MergeFrom(ep.DeepCopy())
 			ep.Spec.BackendRefs = kept
-			ep.Spec.Rules = dropRuleBackend(ep.Spec.Rules, ep.Spec.BackendRefs)
 			if err := r.Patch(ctx, ep, patch); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("remove %s from endpoint %s: %w", comp.Name, ep.Name, err)
 			}
@@ -83,36 +82,6 @@ func (r *Reconciler) pruneFromEndpoints(ctx context.Context, comp *openchoreov1a
 		}
 	}
 	return nil
-}
-
-// dropRuleBackend removes rule backends and mirrors that no longer name a
-// backendRef, and rules left with no backend, so the Endpoint stays valid.
-func dropRuleBackend(rules []openchoreov1alpha1.EndpointRule, refs []openchoreov1alpha1.EndpointBackendRef) []openchoreov1alpha1.EndpointRule {
-	known := map[string]bool{}
-	for _, ref := range refs {
-		known[ref.Name] = true
-	}
-	out := make([]openchoreov1alpha1.EndpointRule, 0, len(rules))
-	for _, rule := range rules {
-		var backends []openchoreov1alpha1.EndpointRuleBackend
-		for _, b := range rule.Backends {
-			if known[b.Name] {
-				backends = append(backends, b)
-			}
-		}
-		if len(backends) == 0 {
-			continue
-		}
-		var mirrors []openchoreov1alpha1.EndpointMirror
-		for _, m := range rule.Mirrors {
-			if known[m.Backend] {
-				mirrors = append(mirrors, m)
-			}
-		}
-		rule.Backends, rule.Mirrors = backends, mirrors
-		out = append(out, rule)
-	}
-	return out
 }
 
 // listComponentsForEndpoint maps an Endpoint to the Components it routes to.

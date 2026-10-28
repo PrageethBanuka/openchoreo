@@ -126,12 +126,6 @@ func TestValidateWeights(t *testing.T) {
 	ep.Spec.BackendRefs[0].Weight = ptr.To[int32](0)
 	_, err := validator(t, clusterType(nil)).ValidateCreate(context.Background(), ep)
 	refused(t, err, "every backend has weight 0")
-
-	ep.Spec.Rules = []openchoreodevv1alpha1.EndpointRule{{
-		Name: "everyone", Backends: []openchoreodevv1alpha1.EndpointRuleBackend{{Name: "orders-v1"}},
-	}}
-	_, err = validator(t, clusterType(nil)).ValidateCreate(context.Background(), ep)
-	require.NoError(t, err, "a catch-all rule carries its own weights")
 }
 
 func TestValidateIgnoresDeletingEndpoints(t *testing.T) {

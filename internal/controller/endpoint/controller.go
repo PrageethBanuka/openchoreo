@@ -126,8 +126,7 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 		return ctrl.Result{}, err
 	}
 
-	// A catch-all rule carries its own weights for unmatched requests.
-	if n := len(ep.Spec.Rules); (n == 0 || len(ep.Spec.Rules[n-1].Matches) > 0) && !hasWeightedBackend(ep.Spec.BackendRefs) {
+	if !hasWeightedBackend(ep.Spec.BackendRefs) {
 		controller.MarkFalseCondition(ep, ConditionReady, ReasonNoWeightedBackend,
 			"Every backend has weight 0, so the Endpoint would serve nothing; give at least one backend a weight above 0")
 		return ctrl.Result{}, nil
@@ -148,7 +147,6 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 		EndpointType: snapshot,
 		Visibility:   ep.Spec.Visibility,
 		BackendRefs:  ep.Spec.BackendRefs,
-		Rules:        ep.Spec.Rules,
 		Schema:       ep.Spec.Schema,
 		Parameters:   ep.Spec.Parameters,
 	})
@@ -320,7 +318,6 @@ func (r *Reconciler) ensureEndpointRelease(
 			EndpointType: snapshot,
 			Visibility:   ep.Spec.Visibility,
 			BackendRefs:  ep.Spec.BackendRefs,
-			Rules:        ep.Spec.Rules,
 			Schema:       ep.Spec.Schema,
 			Parameters:   ep.Spec.Parameters,
 		},

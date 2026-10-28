@@ -38,12 +38,6 @@ type EndpointReleaseSpec struct {
 	// +listMapKey=name
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`
 
-	// Rules holds the snapshot of the Endpoint's routing rules.
-	// +optional
-	// +listType=map
-	// +listMapKey=name
-	Rules []EndpointRule `json:"rules,omitempty"`
-
 	// Schema holds the snapshot of the Endpoint's API definition, if set.
 	// +optional
 	Schema *EndpointSchema `json:"schema,omitempty"`

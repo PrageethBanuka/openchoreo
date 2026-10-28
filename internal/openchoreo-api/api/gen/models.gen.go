@@ -193,12 +193,6 @@ const (
 	EndpointBackendRefKindComponent EndpointBackendRefKind = "Component"
 )
 
-// Defines values for EndpointMatchHeadersType.
-const (
-	Exact             EndpointMatchHeadersType = "Exact"
-	RegularExpression EndpointMatchHeadersType = "RegularExpression"
-)
-
 // Defines values for EndpointReleaseSpecEndpointTypeKind.
 const (
 	EndpointReleaseSpecEndpointTypeKindClusterEndpointType EndpointReleaseSpecEndpointTypeKind = "ClusterEndpointType"
@@ -2145,26 +2139,6 @@ type EndpointList struct {
 	Pagination Pagination `json:"pagination"`
 }
 
-// EndpointMatch Request conditions, all of which must hold
-type EndpointMatch struct {
-	Cookies *[]struct {
-		Name  string `json:"name"`
-		Value string `json:"value"`
-	} `json:"cookies,omitempty"`
-	Headers *[]struct {
-		Name  string                    `json:"name"`
-		Type  *EndpointMatchHeadersType `json:"type,omitempty"`
-		Value string                    `json:"value"`
-	} `json:"headers,omitempty"`
-	QueryParams *[]struct {
-		Name  string `json:"name"`
-		Value string `json:"value"`
-	} `json:"queryParams,omitempty"`
-}
-
-// EndpointMatchHeadersType defines model for EndpointMatch.Headers.Type.
-type EndpointMatchHeadersType string
-
 // EndpointRelease EndpointRelease resource.
 // Immutable snapshot of Endpoint.spec and the referenced (Cluster)EndpointType.spec
 // at the time it was cut. Created by the Endpoint controller.
@@ -2302,9 +2276,6 @@ type EndpointReleaseSpec struct {
 	// Parameters Snapshot of parameter values from Endpoint.spec at release time.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
 
-	// Rules Snapshot of Endpoint.spec.rules at release time.
-	Rules *[]EndpointRule `json:"rules,omitempty"`
-
 	// Schema API definition of the Endpoint
 	Schema *EndpointSchema `json:"schema,omitempty"`
 
@@ -2329,28 +2300,6 @@ type EndpointRouteOwner struct {
 
 // EndpointRouteOwnerVisibilities defines model for EndpointRouteOwner.Visibilities.
 type EndpointRouteOwnerVisibilities string
-
-// EndpointRule Routes the requests it matches to its backends. Rules are evaluated in order; a rule without
-// matches is the catch-all and must be last. Without one, unmatched requests follow backendRefs.
-type EndpointRule struct {
-	// Backends Backends (by backendRefs name) receiving the rule's requests, with relative weights
-	Backends []struct {
-		Name   string `json:"name"`
-		Weight *int32 `json:"weight,omitempty"`
-	} `json:"backends"`
-
-	// Matches A request matches when any entry matches; every condition of an entry must hold
-	Matches *[]EndpointMatch `json:"matches,omitempty"`
-
-	// Mirrors Copies a share of the rule's requests to a backend; responses are discarded
-	Mirrors *[]struct {
-		Backend string `json:"backend"`
-		Percent int32  `json:"percent"`
-	} `json:"mirrors,omitempty"`
-
-	// Name Identifies the rule
-	Name string `json:"name"`
-}
 
 // EndpointSchema API definition of the Endpoint
 type EndpointSchema struct {
@@ -2396,9 +2345,6 @@ type EndpointSpec struct {
 
 	// Parameters Values for the parameter schema declared on the referenced (Cluster)EndpointType. Validated by the controller.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
-
-	// Rules Header, cookie and query routing, in order. Unset routes every request by backendRefs weights.
-	Rules *[]EndpointRule `json:"rules,omitempty"`
 
 	// Schema API definition of the Endpoint
 	Schema *EndpointSchema `json:"schema,omitempty"`

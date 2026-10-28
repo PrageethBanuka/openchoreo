@@ -9,9 +9,6 @@ import (
 )
 
 // EndpointSpec defines the desired state of Endpoint.
-// +kubebuilder:validation:XValidation:rule="!has(self.rules) || self.rules.all(r, r.backends.all(b, self.backendRefs.exists(x, x.name == b.name)))",message="every rule backend must name a backend in spec.backendRefs"
-// +kubebuilder:validation:XValidation:rule="!has(self.rules) || self.rules.all(r, !has(r.mirrors) || r.mirrors.all(m, self.backendRefs.exists(x, x.name == m.backend)))",message="every mirror must name a backend in spec.backendRefs"
-// +kubebuilder:validation:XValidation:rule="!has(self.rules) || self.rules.all(r, (has(r.matches) && size(r.matches) > 0) || r.name == self.rules[size(self.rules) - 1].name)",message="only the last rule may have no matches; it is the catch-all"
 type EndpointSpec struct {
 	// Owner identifies the Project this Endpoint belongs to.
 	// +kubebuilder:validation:Required
@@ -52,16 +49,6 @@ type EndpointSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	BackendRefs []EndpointBackendRef `json:"backendRefs"`
-
-	// Rules route matching requests to chosen backends, ahead of the default
-	// split. They are evaluated in order and the first match wins; a rule with
-	// no matches is the catch-all and must come last. When unset, the Endpoint
-	// sends all traffic across backendRefs by weight.
-	// +optional
-	// +listType=map
-	// +listMapKey=name
-	// +kubebuilder:validation:MaxItems=16
-	Rules []EndpointRule `json:"rules,omitempty"`
 
 	// Schema is the API definition this Endpoint exposes. When unset it resolves
 	// from the backend's Workload endpoint schema at render time rather than
@@ -128,7 +115,7 @@ const (
 // +kubebuilder:validation:XValidation:rule="self.kind != 'Component' || has(self.component)",message="component must be set when kind is Component"
 type EndpointBackendRef struct {
 	// Name identifies this backend within the Endpoint. It is the list's map key,
-	// the handle status reports resolution against, and what rules, overrides and
+	// the handle status reports resolution against, and what overrides and
 	// templates use to single out one backend.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -156,39 +143,6 @@ type EndpointBackendRef struct {
 	Weight *int32 `json:"weight,omitempty"`
 }
 
-// EndpointRule sends requests that match it to chosen backends.
-type EndpointRule struct {
-	// Name identifies the rule, so automation and GitOps can own it.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name string `json:"name"`
-
-	// Matches select the requests this rule applies to: a request matches when
-	// any entry matches, and an entry matches when all of its conditions hold.
-	// A rule without matches applies to every request; only the last rule may
-	// omit them.
-	// +optional
-	// +kubebuilder:validation:MaxItems=8
-	Matches []EndpointMatch `json:"matches,omitempty"`
-
-	// Backends are the backends matching requests go to, by name, with relative
-	// weights.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
-	// +listType=map
-	// +listMapKey=name
-	Backends []EndpointRuleBackend `json:"backends"`
-
-	// Mirrors copy a share of this rule's requests to other backends and
-	// discard their responses.
-	// +optional
-	// +kubebuilder:validation:MaxItems=4
-	Mirrors []EndpointMirror `json:"mirrors,omitempty"`
-}
-
 // EndpointMatch is one set of conditions a request must all meet.
 type EndpointMatch struct {
 	// Headers the request must carry.
@@ -201,11 +155,6 @@ type EndpointMatch struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=1
 	Cookies []EndpointCookieMatch `json:"cookies,omitempty"`
-
-	// QueryParams the request URL must carry, by exact value.
-	// +optional
-	// +kubebuilder:validation:MaxItems=8
-	QueryParams []EndpointQueryParamMatch `json:"queryParams,omitempty"`
 }
 
 // EndpointHeaderMatchType is how a header value is compared.
@@ -253,49 +202,6 @@ type EndpointCookieMatch struct {
 	Value string `json:"value"`
 }
 
-// EndpointQueryParamMatch is a query parameter condition.
-type EndpointQueryParamMatch struct {
-	// Name is the query parameter name.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=256
-	Name string `json:"name"`
-
-	// Value is the exact expected value.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=1024
-	Value string `json:"value"`
-}
-
-// EndpointRuleBackend is a backend a rule sends traffic to.
-type EndpointRuleBackend struct {
-	// Name is a backend in spec.backendRefs.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-
-	// Weight is this backend's share of the rule's traffic, relative to the
-	// rule's other backends; 0 sends none.
-	// +optional
-	// +kubebuilder:default=1
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1000000
-	Weight *int32 `json:"weight,omitempty"`
-}
-
-// EndpointMirror copies a share of a rule's requests to a backend.
-type EndpointMirror struct {
-	// Backend is a backend in spec.backendRefs, usually one at weight 0.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Backend string `json:"backend"`
-
-	// Percent of the rule's requests to copy.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=100
-	Percent int32 `json:"percent"`
-}
-
 // EndpointStatus defines the observed state of Endpoint.
 type EndpointStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
@@ -336,8 +242,8 @@ type LatestEndpointRelease struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Endpoint is the Schema for the endpoints API.
-// An Endpoint routes traffic across one or more backends using weights and
-// rules, rendered through an EndpointType or ClusterEndpointType. It is
+// An Endpoint routes traffic across one or more backends by weight, rendered
+// through an EndpointType or ClusterEndpointType. It is
 // concerned with traffic routing only; the compute side (ports, network
 // policies) stays on Workload.spec.endpoints.
 // The plural "endpoints" and the short name "ep" are taken by core v1 Endpoints

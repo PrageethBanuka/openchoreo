@@ -575,9 +575,8 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 
 		// rulesRelease renders one route rule per context rule, listing its
 		// backends by name with their weights, and its mirrors.
-		rulesRelease := func(name string, rules ...openchoreov1alpha1.EndpointRule) *openchoreov1alpha1.EndpointRelease {
-			rel := newRelease(name, refs...)
-			rel.Spec.Rules = rules
+		rulesRelease := func(name string, backendRefs ...openchoreov1alpha1.EndpointBackendRef) *openchoreov1alpha1.EndpointRelease {
+			rel := newRelease(name, backendRefs...)
 			rel.Spec.EndpointType.Spec.Resources = []openchoreov1alpha1.ResourceTemplate{{
 				ID: "route",
 				Template: mustRaw(map[string]any{
@@ -599,57 +598,15 @@ var _ = Describe("EndpointReleaseBinding Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			return string(out)
 		}
-		preview := openchoreov1alpha1.EndpointRule{
-			Name:     "preview",
-			Matches:  []openchoreov1alpha1.EndpointMatch{{Headers: []openchoreov1alpha1.EndpointHeaderMatch{{Name: "x-preview", Value: "v2"}}}},
-			Backends: []openchoreov1alpha1.EndpointRuleBackend{{Name: "payments-v2"}},
-		}
 
-		It("renders rules in order and ends them with the backendRefs split as the catch-all", func() {
-			setup(rulesRelease("rel-1", preview), newBinding("rel-1"), componentBinding("payments-v1"), componentBinding("payments-v2"))
-			b := reconcileBinding()
-			Expect(renderedRules(b)).To(MatchJSON(`[
-				{"name":"preview","matches":1,"backends":["payments-v2=1"],"mirrors":[]},
-				{"name":"default","matches":0,"backends":["payments-v1=90","payments-v2=10"],"mirrors":[]}
-			]`))
-		})
-
-		It("applies overrides to split rules, but not to a single-backend rule", func() {
-			canary := openchoreov1alpha1.EndpointRule{
-				Name: "everyone",
-				Backends: []openchoreov1alpha1.EndpointRuleBackend{
-					{Name: "payments-v1", Weight: ptr.To[int32](95)}, {Name: "payments-v2", Weight: ptr.To[int32](5)},
-				},
-				Mirrors: []openchoreov1alpha1.EndpointMirror{{Backend: "payments-v2", Percent: 10}},
-			}
+		It("renders one default rule that splits the backends by weight", func() {
 			binding := newBinding("rel-1")
-			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{{Name: "payments-v2", Weight: ptr.To[int32](0)}}
-			setup(rulesRelease("rel-1", preview, canary), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
+			binding.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{{Name: "payments-v2", Weight: ptr.To[int32](30)}}
+			setup(rulesRelease("rel-1", refs...), binding, componentBinding("payments-v1"), componentBinding("payments-v2"))
 			b := reconcileBinding()
 			Expect(renderedRules(b)).To(MatchJSON(`[
-				{"name":"preview","matches":1,"backends":["payments-v2=1"],"mirrors":[]},
-				{"name":"everyone","matches":0,"backends":["payments-v1=95","payments-v2=0"],"mirrors":["payments-v2"]}
-			]`), "the preview still reaches v2 while the catch-all is rolled back; no default is added")
-		})
-
-		It("blocks on a rule backend that is not deployed, and drops a mirror to one", func() {
-			setup(rulesRelease("rel-1", preview), newBinding("rel-1"), componentBinding("payments-v1"))
-			b := reconcileBinding()
-			Expect(condition(b, string(ConditionBackendsResolved)).Status).To(Equal(metav1.ConditionFalse))
-
-			staged := []openchoreov1alpha1.EndpointBackendRef{refs[0], {
-				Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "api"}, Weight: ptr.To[int32](0),
-			}}
-			rel := rulesRelease("rel-2", openchoreov1alpha1.EndpointRule{
-				Name:     "shadow",
-				Backends: []openchoreov1alpha1.EndpointRuleBackend{{Name: "payments-v1"}},
-				Mirrors:  []openchoreov1alpha1.EndpointMirror{{Backend: "payments-v2", Percent: 10}},
-			})
-			rel.Spec.BackendRefs = staged
-			setup(rel, newBinding("rel-2"), componentBinding("payments-v1"))
-			b = reconcileBinding()
-			Expect(condition(b, string(ConditionBackendsResolved)).Status).To(Equal(metav1.ConditionTrue))
-			Expect(renderedRules(b)).To(MatchJSON(`[{"name":"shadow","matches":0,"backends":["payments-v1=1"],"mirrors":[]}]`))
+				{"name":"default","matches":0,"backends":["payments-v1=90","payments-v2=30"],"mirrors":[]}
+			]`))
 		})
 
 		It("reports no gateway URL for a mesh route", func() {

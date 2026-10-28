@@ -253,10 +253,10 @@ var _ = Describe("Endpoint Controller", func() {
 		Expect(err.Error()).To(ContainSubstring("spec.type cannot be changed after creation"))
 	})
 
-	// createEndpointWith creates an Endpoint with the given visibility and
-	// rules, for the slot and rule tests.
+	// createEndpointWith creates an Endpoint with the given visibility, for
+	// the slot tests.
 	createEndpointWith := func(name string, typeRef openchoreov1alpha1.EndpointTypeRef,
-		visibility []openchoreov1alpha1.EndpointVisibility, rules []openchoreov1alpha1.EndpointRule,
+		visibility []openchoreov1alpha1.EndpointVisibility,
 		refs ...openchoreov1alpha1.EndpointBackendRef) (*openchoreov1alpha1.Endpoint, error) {
 		ep := &openchoreov1alpha1.Endpoint{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Finalizers: []string{EndpointFinalizer}},
@@ -265,7 +265,6 @@ var _ = Describe("Endpoint Controller", func() {
 				Type:        typeRef,
 				Visibility:  visibility,
 				BackendRefs: refs,
-				Rules:       rules,
 			},
 		}
 		if err := k8sClient.Create(ctx, ep); err != nil {
@@ -294,50 +293,24 @@ var _ = Describe("Endpoint Controller", func() {
 	}
 	external := []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityExternal}
 	internal := []openchoreov1alpha1.EndpointVisibility{openchoreov1alpha1.EndpointVisibilityInternal}
-	previewRule := func(backend string) openchoreov1alpha1.EndpointRule {
-		return openchoreov1alpha1.EndpointRule{
-			Name: "preview",
-			Matches: []openchoreov1alpha1.EndpointMatch{{
-				Headers: []openchoreov1alpha1.EndpointHeaderMatch{{Name: "x-preview", Value: "green"}},
-			}},
-			Backends: []openchoreov1alpha1.EndpointRuleBackend{{Name: backend}},
-		}
-	}
-
-	It("rejects rules naming an unknown backend, and a catch-all that is not last", func() {
-		typeRef := cet("cet-rules-invalid")
-		_, err := createEndpointWith("ep-rules-unknown", typeRef, external,
-			[]openchoreov1alpha1.EndpointRule{previewRule("nope")}, componentBackend("anything", 1))
-		Expect(err).To(HaveOccurred())
-
-		catchAll := openchoreov1alpha1.EndpointRule{
-			Name:     "everyone",
-			Backends: []openchoreov1alpha1.EndpointRuleBackend{{Name: "anything"}},
-		}
-		_, err = createEndpointWith("ep-rules-order", typeRef, external,
-			[]openchoreov1alpha1.EndpointRule{catchAll, previewRule("anything")}, componentBackend("anything", 1))
-		Expect(err).To(HaveOccurred())
-	})
-
 	It("requires a visibility", func() {
-		_, err := createEndpointWith("ep-no-visibility", cet("cet-no-visibility"), nil, nil, componentBackend("anything", 1))
+		_, err := createEndpointWith("ep-no-visibility", cet("cet-no-visibility"), nil, componentBackend("anything", 1))
 		Expect(err).To(HaveOccurred())
 	})
 
 	It("refuses a split where every backend has weight 0", func() {
 		createComponent("zero-v1", project)
-		ep, err := createEndpointWith("ep-zero", cet("cet-zero"), external, nil, componentBackend("zero-v1", 0))
+		ep, err := createEndpointWith("ep-zero", cet("cet-zero"), external, componentBackend("zero-v1", 0))
 		Expect(err).NotTo(HaveOccurred())
 		cond := readyCondition(reconcileAndGet(ep))
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(string(ReasonNoWeightedBackend)))
 	})
 
-	It("snapshots visibility and rules into the release", func() {
+	It("snapshots visibility into the release", func() {
 		createComponent("bg-blue", project)
 		createComponent("bg-green", project)
 		ep, err := createEndpointWith("ep-bluegreen", cet("cet-bluegreen"), external,
-			[]openchoreov1alpha1.EndpointRule{previewRule("bg-green")},
 			componentBackend("bg-blue", 100), componentBackend("bg-green", 0))
 		Expect(err).NotTo(HaveOccurred())
 		updated := reconcileAndGet(ep)
@@ -347,20 +320,18 @@ var _ = Describe("Endpoint Controller", func() {
 		rel := &openchoreov1alpha1.EndpointRelease{}
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: updated.Status.LatestRelease.Name}, rel)).To(Succeed())
 		Expect(rel.Spec.Visibility).To(Equal(external))
-		Expect(rel.Spec.Rules).To(HaveLen(1))
-		Expect(rel.Spec.Rules[0].Name).To(Equal("preview"))
 	})
 
 	It("holds back a newer Endpoint routing a component in a visibility another Endpoint already routes it in", func() {
 		createComponent("slot-v1", project)
 		typeRef := cet("cet-slot-conflict")
-		holder, err := createEndpointWith("ep-slot-a", typeRef, external, nil, componentBackend("slot-v1", 100))
+		holder, err := createEndpointWith("ep-slot-a", typeRef, external, componentBackend("slot-v1", 100))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(readyCondition(reconcileAndGet(holder)).Status).To(Equal(metav1.ConditionTrue))
 
 		// The webhook is not running in envtest, which is the case the
 		// controller backstop exists for.
-		newer, err := createEndpointWith("ep-slot-b", typeRef, external, nil, componentBackend("slot-v1", 100))
+		newer, err := createEndpointWith("ep-slot-b", typeRef, external, componentBackend("slot-v1", 100))
 		Expect(err).NotTo(HaveOccurred())
 		updated := reconcileAndGet(newer)
 		cond := readyCondition(updated)
@@ -373,7 +344,7 @@ var _ = Describe("Endpoint Controller", func() {
 		Expect(readyCondition(reconcileAndGet(holder)).Status).To(Equal(metav1.ConditionTrue))
 
 		By("another visibility is a different slot")
-		partners, err := createEndpointWith("ep-slot-internal", typeRef, internal, nil, componentBackend("slot-v1", 100))
+		partners, err := createEndpointWith("ep-slot-internal", typeRef, internal, componentBackend("slot-v1", 100))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(readyCondition(reconcileAndGet(partners)).Status).To(Equal(metav1.ConditionTrue))
 	})

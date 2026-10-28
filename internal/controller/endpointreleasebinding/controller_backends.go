@@ -19,8 +19,8 @@ import (
 	endpointpipeline "github.com/openchoreo/openchoreo/internal/pipeline/endpoint"
 )
 
-// defaultRuleName names the catch-all rule built from backendRefs when the
-// Endpoint declares none.
+// defaultRuleName names the rule that splits requests across the backends by
+// weight.
 const defaultRuleName = "default"
 
 // backendResolution is the outcome of resolving every backendRef of a release
@@ -35,16 +35,6 @@ type backendResolution struct {
 	// unresolved names the weighted backendRefs that could not be resolved.
 	// Non-empty blocks rendering.
 	unresolved []string
-}
-
-// byName returns the resolved backend with the given name.
-func (res *backendResolution) byName(name string) (endpointpipeline.Backend, bool) {
-	for _, b := range res.backends {
-		if b.Name == name {
-			return b, true
-		}
-	}
-	return endpointpipeline.Backend{}, false
 }
 
 // resolveBackends resolves each backendRef of the release for the binding's
@@ -117,91 +107,23 @@ func effectiveWeight(binding *openchoreov1alpha1.EndpointReleaseBinding, ref ope
 	return controller.EndpointBackendWeight(ref)
 }
 
-// buildRules resolves the release's rules against the resolved backends, in
-// order, and ends the list with a catch-all: the Endpoint's own, or the split
-// of backendRefs by weight when the last rule has matches (or there are none).
-//
-// The binding's weight overrides apply to rule backends too, but only where a
-// rule splits between several backends: a single-backend rule sends all its
-// requests to that backend whatever its weight, so a header preview keeps
-// working while the catch-all is switched or rolled back.
-//
-// A rule backend that is not resolved here blocks rendering unless its weight
-// is 0, as for backendRefs. A mirror to a backend that is not resolved is
-// dropped: it never affects the response. A non-empty problem blocks rendering.
+// buildRules builds the routing rules the type renders: the split of the
+// release's backends by their weight in this environment. A non-empty problem
+// blocks rendering.
 func buildRules(
-	binding *openchoreov1alpha1.EndpointReleaseBinding,
-	release *openchoreov1alpha1.EndpointRelease,
+	_ *openchoreov1alpha1.EndpointReleaseBinding,
+	_ *openchoreov1alpha1.EndpointRelease,
 	res *backendResolution,
 ) (rules []endpointpipeline.Rule, problem string) {
-	for _, rule := range release.Spec.Rules {
-		out := endpointpipeline.Rule{
-			Name:    rule.Name,
-			Matches: convertMatches(rule.Matches),
-			Mirrors: []endpointpipeline.Mirror{},
-		}
-		for _, rb := range rule.Backends {
-			weight := int32(1)
-			if rb.Weight != nil {
-				weight = *rb.Weight
-			}
-			if len(rule.Backends) > 1 {
-				if o := findOverride(binding, rb.Name); o != nil && o.Weight != nil {
-					weight = *o.Weight
-				}
-			}
-			b, ok := res.byName(rb.Name)
-			if !ok {
-				if weight > 0 {
-					return nil, fmt.Sprintf("rule %q routes to backend %q, which is not available in environment %q",
-						rule.Name, rb.Name, binding.Spec.Environment)
-				}
-				continue
-			}
-			b.Weight = weight
-			out.Backends = append(out.Backends, b)
-		}
-		if !hasWeight(out.Backends) {
-			return nil, fmt.Sprintf("rule %q has no backend with a non-zero weight in environment %q",
-				rule.Name, binding.Spec.Environment)
-		}
-		for _, m := range rule.Mirrors {
-			if b, ok := res.byName(m.Backend); ok {
-				out.Mirrors = append(out.Mirrors, endpointpipeline.Mirror{Backend: b, Percent: m.Percent})
-			}
-		}
-		rules = append(rules, out)
+	if !hasWeight(res.backends) {
+		return nil, "No backend with a non-zero weight is available; check the weights in spec.backendOverrides"
 	}
-
-	if n := len(release.Spec.Rules); n == 0 || len(release.Spec.Rules[n-1].Matches) > 0 {
-		if !hasWeight(res.backends) {
-			return nil, "No backend with a non-zero weight is available; check the weights in spec.backendOverrides"
-		}
-		rules = append(rules, endpointpipeline.Rule{
-			Name:     catchAllName(release.Spec.Rules),
-			Matches:  []endpointpipeline.Match{},
-			Backends: res.backends,
-			Mirrors:  []endpointpipeline.Mirror{},
-		})
-	}
-	return rules, ""
-}
-
-// catchAllName returns the name of the generated catch-all rule, avoiding the
-// names of the Endpoint's own rules.
-func catchAllName(rules []openchoreov1alpha1.EndpointRule) string {
-	name := defaultRuleName
-	for taken := true; taken; {
-		taken = false
-		for _, r := range rules {
-			if r.Name == name {
-				name = "catch-all-" + name
-				taken = true
-				break
-			}
-		}
-	}
-	return name
+	return []endpointpipeline.Rule{{
+		Name:     defaultRuleName,
+		Matches:  []endpointpipeline.Match{},
+		Backends: res.backends,
+		Mirrors:  []endpointpipeline.Mirror{},
+	}}, ""
 }
 
 func hasWeight(backends []endpointpipeline.Backend) bool {
@@ -211,34 +133,6 @@ func hasWeight(backends []endpointpipeline.Backend) bool {
 		}
 	}
 	return false
-}
-
-// convertMatches copies rule matches into the render context, with every list
-// non-nil and header match types defaulted.
-func convertMatches(in []openchoreov1alpha1.EndpointMatch) []endpointpipeline.Match {
-	out := make([]endpointpipeline.Match, 0, len(in))
-	for _, m := range in {
-		cm := endpointpipeline.Match{
-			Headers:     make([]endpointpipeline.HeaderMatch, 0, len(m.Headers)),
-			Cookies:     make([]endpointpipeline.CookieMatch, 0, len(m.Cookies)),
-			QueryParams: make([]endpointpipeline.QueryParamMatch, 0, len(m.QueryParams)),
-		}
-		for _, h := range m.Headers {
-			t := string(h.Type)
-			if t == "" {
-				t = string(openchoreov1alpha1.EndpointHeaderMatchExact)
-			}
-			cm.Headers = append(cm.Headers, endpointpipeline.HeaderMatch{Name: h.Name, Type: t, Value: h.Value})
-		}
-		for _, c := range m.Cookies {
-			cm.Cookies = append(cm.Cookies, endpointpipeline.CookieMatch{Name: c.Name, Value: c.Value})
-		}
-		for _, q := range m.QueryParams {
-			cm.QueryParams = append(cm.QueryParams, endpointpipeline.QueryParamMatch{Name: q.Name, Value: q.Value})
-		}
-		out = append(out, cm)
-	}
-	return out
 }
 
 // resolvedBackend pairs the pipeline-facing backend with its structured URL.

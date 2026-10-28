@@ -171,41 +171,6 @@ func TestPruneFromEndpoints(t *testing.T) {
 	assert.Len(t, got.Spec.BackendRefs, 1, "Endpoints of other projects are untouched")
 }
 
-func TestPruneFromEndpointsDropsRuleBackends(t *testing.T) {
-	ep := &openchoreov1alpha1.Endpoint{
-		ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: testNS},
-		Spec: openchoreov1alpha1.EndpointSpec{
-			Owner: openchoreov1alpha1.EndpointOwner{ProjectName: "shop"},
-			BackendRefs: []openchoreov1alpha1.EndpointBackendRef{
-				{Name: "payments-v1", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v1", Endpoint: "http"}, Weight: ptr.To[int32](100)},
-				{Name: "payments-v2", Component: &openchoreov1alpha1.EndpointComponentRef{Name: "payments-v2", Endpoint: "http"}, Weight: ptr.To[int32](0)},
-			},
-			Rules: []openchoreov1alpha1.EndpointRule{
-				{
-					Name:     "preview-v1",
-					Matches:  []openchoreov1alpha1.EndpointMatch{{Headers: []openchoreov1alpha1.EndpointHeaderMatch{{Name: "x-preview", Value: "v1"}}}},
-					Backends: []openchoreov1alpha1.EndpointRuleBackend{{Name: "payments-v1"}},
-				},
-				{
-					Name:     "default",
-					Backends: []openchoreov1alpha1.EndpointRuleBackend{{Name: "payments-v1", Weight: ptr.To[int32](90)}, {Name: "payments-v2", Weight: ptr.To[int32](10)}},
-					Mirrors:  []openchoreov1alpha1.EndpointMirror{{Backend: "payments-v1", Percent: 10}},
-				},
-			},
-		},
-	}
-	r := newEndpointsReconciler(t, ep)
-	require.NoError(t, r.pruneFromEndpoints(context.Background(), testComponent()))
-
-	got := &openchoreov1alpha1.Endpoint{}
-	require.NoError(t, r.Get(context.Background(), client.ObjectKeyFromObject(ep), got))
-	assert.Len(t, got.Spec.BackendRefs, 1)
-	require.Len(t, got.Spec.Rules, 1, "a rule left without backends is dropped")
-	assert.Equal(t, "default", got.Spec.Rules[0].Name)
-	assert.Equal(t, []openchoreov1alpha1.EndpointRuleBackend{{Name: "payments-v2", Weight: ptr.To[int32](10)}}, got.Spec.Rules[0].Backends)
-	assert.Empty(t, got.Spec.Rules[0].Mirrors)
-}
-
 func TestPruneFromEndpointsDeletesWhenNoBackendIsLeft(t *testing.T) {
 	solo := &openchoreov1alpha1.Endpoint{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testNS},

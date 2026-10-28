@@ -11968,103 +11968,6 @@ components:
           default: 1
           example: 90
 
-    EndpointRule:
-      type: object
-      description: |
-        Routes the requests it matches to its backends. Rules are evaluated in order; a rule without
-        matches is the catch-all and must be last. Without one, unmatched requests follow backendRefs.
-      required: [name, backends]
-      properties:
-        name:
-          type: string
-          description: Identifies the rule
-          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
-          example: preview
-        matches:
-          type: array
-          description: A request matches when any entry matches; every condition of an entry must hold
-          maxItems: 8
-          items:
-            $ref: '#/components/schemas/EndpointMatch'
-        backends:
-          type: array
-          description: Backends (by backendRefs name) receiving the rule's requests, with relative weights
-          minItems: 1
-          items:
-            type: object
-            required: [name]
-            properties:
-              name:
-                type: string
-                example: checkout-green
-              weight:
-                type: integer
-                format: int32
-                minimum: 0
-                maximum: 1000000
-                default: 1
-        mirrors:
-          type: array
-          description: Copies a share of the rule's requests to a backend; responses are discarded
-          items:
-            type: object
-            required: [backend, percent]
-            properties:
-              backend:
-                type: string
-                example: trips-go
-              percent:
-                type: integer
-                format: int32
-                minimum: 1
-                maximum: 100
-
-    EndpointMatch:
-      type: object
-      description: Request conditions, all of which must hold
-      properties:
-        headers:
-          type: array
-          items:
-            type: object
-            required: [name, value]
-            properties:
-              name:
-                type: string
-                example: x-preview
-              type:
-                type: string
-                enum: [Exact, RegularExpression]
-                default: Exact
-              value:
-                type: string
-                example: green
-        cookies:
-          type: array
-          maxItems: 1
-          items:
-            type: object
-            required: [name, value]
-            properties:
-              name:
-                type: string
-                pattern: '^[A-Za-z0-9_-]{1,64}$'
-                example: exp_cartrecs
-              value:
-                type: string
-                pattern: '^[A-Za-z0-9_.-]{1,128}$'
-                example: b
-        queryParams:
-          type: array
-          items:
-            type: object
-            required: [name, value]
-            properties:
-              name:
-                type: string
-              value:
-                type: string
-
     EndpointSchema:
       type: object
       description: API definition of the Endpoint
@@ -12156,12 +12059,6 @@ components:
           maxItems: 16
           items:
             $ref: '#/components/schemas/EndpointBackendRef'
-        rules:
-          type: array
-          description: Header, cookie and query routing, in order. Unset routes every request by backendRefs weights.
-          maxItems: 16
-          items:
-            $ref: '#/components/schemas/EndpointRule'
         schema:
           $ref: '#/components/schemas/EndpointSchema'
         parameters:
@@ -12280,11 +12177,6 @@ components:
           minItems: 1
           items:
             $ref: '#/components/schemas/EndpointBackendRef'
-        rules:
-          type: array
-          description: Snapshot of Endpoint.spec.rules at release time.
-          items:
-            $ref: '#/components/schemas/EndpointRule'
         schema:
           $ref: '#/components/schemas/EndpointSchema'
         parameters:

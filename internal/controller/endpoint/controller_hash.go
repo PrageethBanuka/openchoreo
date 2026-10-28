@@ -17,7 +17,6 @@ type ReleaseSpec struct {
 	EndpointType openchoreov1alpha1.EndpointReleaseEndpointType `json:"endpointType"`
 	Visibility   []openchoreov1alpha1.EndpointVisibility        `json:"visibility"`
 	BackendRefs  []openchoreov1alpha1.EndpointBackendRef        `json:"backendRefs"`
-	Rules        []openchoreov1alpha1.EndpointRule              `json:"rules,omitempty"`
 	Schema       *openchoreov1alpha1.EndpointSchema             `json:"schema,omitempty"`
 	Parameters   *runtime.RawExtension                          `json:"parameters,omitempty"`
 }
