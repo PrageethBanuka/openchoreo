@@ -31,6 +31,22 @@ vat -H 'x-preview: green'
 both checkout "/?country=DE"
 pause
 
+if [[ "${OPTIONAL_PATH:-0}" == "1" ]]; then
+  bold "1b. The same preview by path, for testers who can't send a header"
+  run kubectl apply -f 01b-preview-by-path.yaml
+  wait_ready checkout
+  say "A buyer:"
+  vat
+  say "QA, under /checkout/next:"
+  curl -s "$(invoke_url checkout)/next/?country=DE&amount=100"
+  echo
+  both checkout "/next/?country=DE"
+  say "Back to the header preview for the rest of the demo:"
+  run kubectl apply -f 01-preview.yaml
+  wait_ready checkout
+  pause
+fi
+
 bold "2. 00:00, 1 July: switch everyone to green"
 set_weights checkout checkout-blue=0 checkout-green=100
 vat

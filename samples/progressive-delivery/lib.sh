@@ -41,6 +41,7 @@ wait_ready() {
       [[ "$(kubectl get endpointreleasebinding "$b" -n "$NS" -o jsonpath='{.spec.endpointRelease}' 2>/dev/null)" == "$latest" ]] &&
       [[ "$(kubectl get endpointreleasebinding "$b" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" == "True" ]]; then
       wait_backends "$ep"
+      wait_served "$ep"
       return 0
     fi
     sleep 2
@@ -58,6 +59,22 @@ wait_backends() {
   for c in $(kubectl get endpointreleasebinding "$(binding "$ep")" -n "$NS" -o jsonpath='{.status.backends[*].componentName}'); do
     kubectl wait deployment -n "$dpns" -l "openchoreo.dev/component=$c" --for=condition=Available --timeout=180s >/dev/null
   done
+}
+
+# wait_served waits until a backend answers through the gateway. The binding
+# turns Ready once the data plane has the routes, a few seconds before the
+# gateway has programmed them and sees the new Services; until then it
+# answers 500.
+wait_served() {
+  local url
+  url="$(invoke_url "$1")"
+  for _ in $(seq 1 60); do
+    if curl -s -o /dev/null -D - "$url" | tr -d '\r' | grep -qi '^x-served-by:'; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "the gateway does not serve $url yet" >&2
 }
 
 # wait_weights waits until the binding reports the given effective weights
@@ -162,4 +179,53 @@ both() {
     say "east-west, from a pod in the cluster (http://$ep/${suffix#/}):"
     tally_mesh "$ep" "$suffix" "$@"
   fi
+}
+
+# set_mirror patches the binding's backendOverrides to copy a share of the
+# requests to a mirrored backend, e.g. set_mirror trips-api trips-go=100. It
+# waits until the binding reports that share. No new release is cut.
+set_mirror() {
+  local ep="$1" name="${2%%=*}" percent="${2#*=}" got
+  run kubectl patch endpointreleasebinding "$(binding "$ep")" -n "$NS" --type merge \
+    -p "{\"spec\":{\"backendOverrides\":[{\"name\":\"$name\",\"mirror\":{\"percent\":$percent}}]}}"
+  for _ in $(seq 1 60); do
+    got="$(kubectl get endpointreleasebinding "$(binding "$ep")" -n "$NS" \
+      -o jsonpath="{.status.backends[?(@.name==\"$name\")].mirror.percent}")"
+    if [[ "${got:-0}" == "$percent" ]] &&
+      [[ "$(kubectl get endpointreleasebinding "$(binding "$ep")" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="RoutesReady")].status}')" == "True" ]]; then
+      sleep "${SETTLE_SECONDS:-5}"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "the binding of $ep did not reach a $percent% mirror to $name" >&2
+}
+
+# clear_overrides removes the binding's backendOverrides, so the release's
+# weights and mirror shares apply again.
+clear_overrides() {
+  run kubectl patch endpointreleasebinding "$(binding "$1")" -n "$NS" --type merge \
+    -p '{"spec":{"backendOverrides":[]}}'
+}
+
+# gateway_stat sums an Envoy counter of the data-plane gateway.
+gateway_stat() {
+  local pod
+  pod="$(kubectl get pods -n openchoreo-data-plane -l gateway.networking.k8s.io/gateway-name=gateway-default \
+    -o jsonpath='{.items[0].metadata.name}')"
+  kubectl exec -n openchoreo-data-plane "$pod" -- sh -c 'wget -qO- 127.0.0.1:19000/stats 2>/dev/null || curl -s 127.0.0.1:19000/stats' |
+    grep -E "$1" | awk -F': ' '{ sum += $2 } END { print sum + 0 }'
+}
+
+# mirror_count sends REQUESTS requests through the gateway and counts how
+# many copies reached the mirrored backend, from the gateway's counters: a
+# copy's answer never reaches the caller, so the caller can't count it.
+mirror_count() {
+  local ep="$1" backend="$2" url before after
+  url="$(invoke_url "$ep")"
+  before="$(gateway_stat "e-$ep-$ENV_NAME-.*-$backend-.*upstream_rq_total")"
+  for _ in $(seq 1 "$REQUESTS"); do curl -s -o /dev/null "$url"; done
+  sleep 2
+  after="$(gateway_stat "e-$ep-$ENV_NAME-.*-$backend-.*upstream_rq_total")"
+  say "copies that reached $backend: $((after - before)) of $REQUESTS requests (gateway counter)"
 }

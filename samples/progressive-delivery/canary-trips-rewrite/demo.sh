@@ -19,6 +19,8 @@ run kubectl apply -f 01-endpoint.yaml
 wait_ready trips-api
 both trips-api ""
 say "trips-go is deployed and resolved at weight 0: no rider sees it yet."
+say "Testers, with x-canary: true, already reach it:"
+both trips-api "" -H 'x-canary: true'
 pause
 
 for w in 5 25 50; do
@@ -40,6 +42,8 @@ say "Errors, but only on the canary's share. Roll back: one edit, seconds."
 pause
 set_weights trips-api trips-python=100 trips-go=0
 both trips-api ""
+say "Testers still reach the rewrite, so the fix can be checked before riders see it again:"
+both trips-api "" -H 'x-canary: true'
 pause
 
 bold "4. Fix forward, then finish the migration"

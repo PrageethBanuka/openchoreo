@@ -24,13 +24,16 @@ This is Martin Fowler's
 | Step | What changes | What the audience sees |
 | --- | --- | --- |
 | 1. [`components.yaml`](components.yaml), [`01-preview.yaml`](01-preview.yaml) | Blue at 100, green at 0 with a match: `x-preview: green` → green | Buyers pay 21% (NL). With the header, 19% (DE) |
+| 1b. (optional) [`01b-preview-by-path.yaml`](01b-preview-by-path.yaml) | Green's match is a path instead: `/checkout/next` → green | QA previews green in a browser, no header needed |
 | 2. [`02-switch.yaml`](02-switch.yaml) | The binding's overrides: blue 0, green 100 | Everyone pays 19%, on both paths, at once |
 | 3. [`03-rollback.yaml`](03-rollback.yaml) | Blue 100, green 0 | Back to 21% in seconds; the preview still reaches green |
 | 4. [`04-retire-blue.yaml`](04-retire-blue.yaml) | Green only, blue deleted | Done |
 
 ## What to point out
 
-- The preview is a match on green, so it works in production without a separate URL.
+- The preview is a match on green, so it works in production without a
+  separate Endpoint. It can be a header, a cookie or a path
+  (`OPTIONAL_PATH=1 make bluegreen` shows the path).
 - The switch and the rollback edit the binding: no release, no redeploy.
 - A match ignores weights, so the preview keeps working whichever way the
   switch points.

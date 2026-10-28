@@ -1,14 +1,15 @@
 # Progressive delivery with Endpoints
 
-Three demos of progressive delivery, each built on one Endpoint. Every one of
+Four demos of progressive delivery, each built on one Endpoint. Every one of
 them runs the same split for gateway (north-south) and in-cluster (east-west)
 callers.
 
 | Demo | Strategy | Question it answers | Real-world story |
 | --- | --- | --- | --- |
-| [Canary: rewriting trips in Go](canary-trips-rewrite/) | Weights, stepped 5 → 25 → 50 → 100%, with a rollback | Is the new code safe? | Uber rewrote its Schemaless sharding layer from Python to Go and moved traffic over by percentage |
-| [Blue/green: the EU VAT switch](bluegreen-eu-vat/) | A header preview, then an all-at-once switch | Can every request change at one moment? | The EU One-Stop Shop VAT rules took effect at 00:00 on 1 July 2021 |
+| [Canary: rewriting trips in Go](canary-trips-rewrite/) | A testers header, then weights stepped 5 → 25 → 50 → 100%, with a rollback | Is the new code safe? | Uber rewrote its Schemaless sharding layer from Python to Go and moved traffic over by percentage |
+| [Blue/green: the EU VAT switch](bluegreen-eu-vat/) | A header (or path) preview, then an all-at-once switch | Can every request change at one moment? | The EU One-Stop Shop VAT rules took effect at 00:00 on 1 July 2021 |
 | [A/B: cart recommendations](ab-cart-recommendations/) | Cookie groups, optionally mobile only | Is the new feature better? | Amazon's "customers who bought this also bought" in the cart |
+| [Mirror: shadowing the trips rewrite](mirror-trips-shadow/) | Copies of 10%, then 100% of requests, then a canary | Does the new code survive real traffic before anyone depends on it? | Dark launches (Google SRE); Twitter's Diffy |
 
 ## What the Endpoint gives you
 
@@ -43,13 +44,14 @@ and, for the east-west path, a mesh on the data plane (see
 ```shell
 kubectl apply -f samples/getting-started/cluster-endpoint-types/http.yaml
 make -C samples/progressive-delivery images     # builds the apps, imports them into k3d
-make -C samples/progressive-delivery canary      # or bluegreen, ab
+make -C samples/progressive-delivery canary      # or bluegreen, ab, mirror
 make -C samples/progressive-delivery clean
 ```
 
 Each `demo.sh` narrates and pauses between steps; `AUTO=1` runs it straight
 through. `MESH=0` skips the in-cluster path on a data plane without a mesh.
 `REQUESTS` sets how many requests each tally sends (default 100).
+`OPTIONAL_PATH=1` adds the blue/green preview by path.
 
 The apps are deliberately tiny. [`apps/trips-python`](apps/trips-python) is the
 original trips service. [`apps/demo-go`](apps/demo-go) serves the Go rewrite,
