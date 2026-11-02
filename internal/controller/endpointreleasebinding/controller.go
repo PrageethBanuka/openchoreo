@@ -146,7 +146,7 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 	controller.MarkTrueCondition(binding, ConditionBackendsResolved, ReasonBackendsResolved,
 		fmt.Sprintf("%d backend(s) resolved", len(resolved.backends)))
 
-	rr, err := r.renderAndEmit(ctx, binding, in, md, resolved.backends, buildRules(in.release, resolved.backends))
+	rr, err := r.renderAndEmit(ctx, binding, in, md, resolved.backends, buildRules(in.release, resolved))
 	if err != nil || rr == nil {
 		return ctrl.Result{}, err
 	}
