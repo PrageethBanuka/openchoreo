@@ -110,6 +110,7 @@ func buildRenderInput(
 	in *reconcileInputs,
 	md endpointpipeline.MetadataContext,
 	backends []endpointpipeline.Backend,
+	rules []endpointpipeline.Rule,
 ) *endpointpipeline.RenderInput {
 	return &endpointpipeline.RenderInput{
 		EndpointTypeSpec:   &in.release.Spec.EndpointType.Spec,
@@ -117,7 +118,7 @@ func buildRenderInput(
 		EnvironmentConfigs: binding.Spec.EndpointTypeEnvironmentConfigs,
 		Visibility:         in.release.Spec.Visibility,
 		Backends:           backends,
-		Rules:              buildRules(in.release, backends),
+		Rules:              rules,
 		Metadata:           md,
 		DataPlane:          endpointpipeline.BuildDataPlaneContext(in.dataPlane),
 		Environment:        endpointpipeline.BuildEnvironmentContext(in.environment, in.dataPlane),

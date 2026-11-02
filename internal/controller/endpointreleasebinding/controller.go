@@ -151,7 +151,7 @@ func (r *Reconciler) reconcile(ctx context.Context, old, binding *openchoreov1al
 
 	// One CEL cost budget per reconcile, shared by rendering and URLs.
 	ctx = template.WithReconcileBudget(ctx, r.CELCostLimit)
-	input := buildRenderInput(binding, in, md, resolved.backends)
+	input := buildRenderInput(binding, in, md, resolved.backends, buildRules(in.release, resolved))
 	rr, err := r.renderAndEmit(ctx, binding, input)
 	if err != nil || rr == nil {
 		return ctrl.Result{}, err
