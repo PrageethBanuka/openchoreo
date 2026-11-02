@@ -35,6 +35,7 @@ func (r *Reconciler) renderAndEmit(
 	in *reconcileInputs,
 	md endpointpipeline.MetadataContext,
 	backends []endpointpipeline.Backend,
+	rules []endpointpipeline.Rule,
 ) (*openchoreov1alpha1.RenderedRelease, error) {
 	logger := log.FromContext(ctx)
 
@@ -47,6 +48,7 @@ func (r *Reconciler) renderAndEmit(
 		EnvironmentConfigs: binding.Spec.EndpointTypeEnvironmentConfigs,
 		Visibility:         in.release.Spec.Visibility,
 		Backends:           backends,
+		Rules:              rules,
 		Metadata:           md,
 		DataPlane:          endpointpipeline.BuildDataPlaneContext(in.dataPlane),
 		Environment:        endpointpipeline.BuildEnvironmentContext(in.environment, in.dataPlane),
