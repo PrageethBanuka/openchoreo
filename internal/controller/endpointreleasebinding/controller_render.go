@@ -129,6 +129,7 @@ func buildRenderInput(
 		EnvironmentConfigs: binding.Spec.EndpointTypeEnvironmentConfigs,
 		Visibility:         in.release.Spec.Visibility,
 		Backends:           backends,
+		Rules:              buildRules(in.release, backends),
 		Metadata:           md,
 		DataPlane:          endpointpipeline.BuildDataPlaneContext(in.dataPlane),
 		Environment:        endpointpipeline.BuildEnvironmentContext(in.environment, in.dataPlane),
