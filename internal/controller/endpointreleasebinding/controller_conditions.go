@@ -25,6 +25,11 @@ const (
 	// RenderedRelease's status.resources passes its per-Kind health check.
 	ConditionResourcesReady controller.ConditionType = "ResourcesReady"
 
+	// ConditionBackendOverridesApplied reports whether every
+	// spec.backendOverrides entry applies to the pinned release. Set only when
+	// the binding has overrides; informational, not part of Ready.
+	ConditionBackendOverridesApplied controller.ConditionType = "BackendOverridesApplied"
+
 	// ConditionReady aggregates BackendsResolved, Synced, and ResourcesReady.
 	ConditionReady controller.ConditionType = "Ready"
 
@@ -73,9 +78,14 @@ const (
 	// since the RenderedRelease is left as it was rather than updated.
 	ReasonBackendsUnresolved controller.ConditionReason = "BackendsUnresolved"
 
-	// ReasonBackendOverrideInvalid indicates a spec.backendOverrides entry
-	// names a backend the pinned EndpointRelease does not have.
-	ReasonBackendOverrideInvalid controller.ConditionReason = "BackendOverrideInvalid"
+	// ReasonBackendOverridesApplied indicates every spec.backendOverrides
+	// entry applies to a backend of the pinned release.
+	ReasonBackendOverridesApplied controller.ConditionReason = "BackendOverridesApplied"
+
+	// ReasonBackendOverridesIgnored indicates some spec.backendOverrides
+	// entries name a backend the pinned release does not have, or set a mirror
+	// share on a backend that is not a mirror. They are ignored.
+	ReasonBackendOverridesIgnored controller.ConditionReason = "BackendOverridesIgnored"
 
 	// ReasonRenderingFailed indicates the endpoint pipeline failed to render
 	// the type's resources (CEL evaluation error, failed validation rule,
