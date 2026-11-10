@@ -48,6 +48,10 @@ const (
 	// The EndpointRelease is still cut; only the automatic deployment is blocked.
 	ReasonAutoDeployFailed controller.ConditionReason = "AutoDeployFailed"
 
+	// ReasonUnsupportedByType indicates the Endpoint uses a routing feature its
+	// EndpointType does not declare in its capabilities.
+	ReasonUnsupportedByType controller.ConditionReason = "UnsupportedByType"
+
 	// ReasonFinalizing indicates the Endpoint is being finalized.
 	ReasonFinalizing controller.ConditionReason = "Finalizing"
 )
