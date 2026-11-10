@@ -748,6 +748,11 @@ func (in *ClusterEndpointTypeSpec) DeepCopyInto(out *ClusterEndpointTypeSpec) {
 		*out = make([]ValidationRule, len(*in))
 		copy(*out, *in)
 	}
+	if in.Capabilities != nil {
+		in, out := &in.Capabilities, &out.Capabilities
+		*out = make([]EndpointCapability, len(*in))
+		copy(*out, *in)
+	}
 	if in.Resources != nil {
 		in, out := &in.Resources, &out.Resources
 		*out = make([]ResourceTemplate, len(*in))
@@ -3316,6 +3321,11 @@ func (in *EndpointTypeSpec) DeepCopyInto(out *EndpointTypeSpec) {
 	if in.Validations != nil {
 		in, out := &in.Validations, &out.Validations
 		*out = make([]ValidationRule, len(*in))
+		copy(*out, *in)
+	}
+	if in.Capabilities != nil {
+		in, out := &in.Capabilities, &out.Capabilities
+		*out = make([]EndpointCapability, len(*in))
 		copy(*out, *in)
 	}
 	if in.Resources != nil {

@@ -99,6 +99,11 @@ func (r *Reconciler) reconcile(ctx context.Context, old, ep *openchoreov1alpha1.
 		return ctrl.Result{}, nil
 	}
 
+	if problems := capabilityProblems(snapshot.Spec.Capabilities, ep); len(problems) > 0 {
+		controller.MarkFalseCondition(ep, ConditionReady, ReasonUnsupportedByType, strings.Join(problems, "; "))
+		return ctrl.Result{}, nil
+	}
+
 	problems, err := r.validateBackends(ctx, ep)
 	if err != nil {
 		return ctrl.Result{}, err
