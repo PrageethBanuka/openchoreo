@@ -40,7 +40,7 @@ var _ = Describe("buildRules", func() {
 
 		Expect(rules).To(HaveLen(2))
 		Expect(rules[0].Name).To(Equal("canary"))
-		Expect(rules[0].Backends).To(ConsistOf(And(HaveField("Name", "canary"), HaveField("Weight", int32(1)))),
+		Expect(rules[0].Backends).To(ConsistOf(And(HaveField("Name", "canary"), HaveField("Weight", int32(1)), HaveField("Percent", int32(100)))),
 			"a match sends every request it matches, whatever the weights")
 		Expect(rules[0].Matches[0].Conditions).To(Equal([]endpointpipeline.HeaderMatch{
 			{Name: "x-canary", Type: endpointpipeline.HeaderMatchExact, Value: "true"},

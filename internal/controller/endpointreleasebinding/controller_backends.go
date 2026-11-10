@@ -108,6 +108,7 @@ func (r *Reconciler) resolveBackends(
 		out.policyTargets = append(out.policyTargets, res.target)
 	}
 
+	out.backends = endpointpipeline.WithPercents(out.backends)
 	return out, nil
 }
 
@@ -148,7 +149,7 @@ func buildRules(
 		}
 		if ref.Match != nil {
 			matched := b
-			matched.Weight = 1
+			matched.Weight, matched.Percent = 1, 100
 			rules = append(rules, endpointpipeline.Rule{
 				Name:     ref.Name,
 				Matches:  []endpointpipeline.Match{convertMatch(ref.Match)},
