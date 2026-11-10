@@ -8,6 +8,7 @@ kind: ClusterEndpointType
 metadata:
   name: istio-virtualservice
 spec:
+  capabilities: [Match, RegularExpression, Mirror, MirrorPercent]
   validations:
     - rule: ${visibility == ["namespace"]}
       message: istio-virtualservice serves in-cluster callers only; set spec.visibility to [namespace]

@@ -104,3 +104,33 @@ func TestSampleType_IstioRendersRules(t *testing.T) {
 	require.Len(t, mirrors, 1)
 	assert.Equal(t, map[string]any{"value": float64(10)}, mirrors[0].(map[string]any)["percentage"])
 }
+
+func TestSampleType_GAMMARendersRules(t *testing.T) {
+	out, err := NewPipeline().Render(context.Background(), progressiveInput(t, "gamma-httproute.yaml", v1alpha1.EndpointVisibilityNamespace))
+	require.NoError(t, err)
+	require.Len(t, out.Entries, 1)
+
+	spec := out.Entries[0].Object["spec"].(map[string]any)
+	parents := spec["parentRefs"].([]any)
+	require.Len(t, parents, 3, "callers of any backend's Service get the Endpoint's routing")
+	assert.Equal(t, map[string]any{"group": "", "kind": "Service", "name": "greeter-dev-1a2b", "port": float64(8080)}, parents[0])
+
+	rules := spec["rules"].([]any)
+	require.Len(t, rules, 3)
+	assert.Equal(t, []any{map[string]any{
+		"headers": []any{map[string]any{"type": "Exact", "name": "x-canary", "value": "true"}},
+	}}, rules[0].(map[string]any)["matches"])
+	assert.NotContains(t, rules[2].(map[string]any), "matches", "the default rule matches everything")
+	assert.Len(t, rules[2].(map[string]any)["backendRefs"], 2)
+}
+
+func TestSampleTypes_DeclareCapabilities(t *testing.T) {
+	all := []v1alpha1.EndpointCapability{
+		v1alpha1.EndpointCapabilityMatch, v1alpha1.EndpointCapabilityRegularExpression,
+		v1alpha1.EndpointCapabilityMirror, v1alpha1.EndpointCapabilityMirrorPercent,
+	}
+	assert.ElementsMatch(t, all, loadProgressiveType(t, "http.yaml").Capabilities)
+	assert.ElementsMatch(t, all, loadProgressiveType(t, "istio-virtualservice.yaml").Capabilities)
+	assert.Equal(t, []v1alpha1.EndpointCapability{v1alpha1.EndpointCapabilityMatch},
+		loadProgressiveType(t, "gamma-httproute.yaml").Capabilities)
+}

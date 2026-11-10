@@ -19,6 +19,7 @@ spec:
         pathPrefix:
           type: string
           default: /
+  capabilities: [Match, RegularExpression, Mirror, MirrorPercent]
   validations:
     - rule: ${backends.all(b, b.protocol in ["HTTP", "GraphQL", "Websocket"])}
       message: http-progressive only routes HTTP, GraphQL and Websocket endpoints
