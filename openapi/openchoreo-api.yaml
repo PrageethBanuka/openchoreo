@@ -12250,6 +12250,17 @@ components:
             $ref: '#/components/schemas/ValidationRule'
         urls:
           $ref: '#/components/schemas/EndpointTypeURLs'
+
+        capabilities:
+          type: array
+          description: |
+            Routing features this type renders beyond weighted backends. An Endpoint
+            that uses one the type doesn't list is not released. Unset means the
+            type doesn't declare them, and nothing is checked.
+          uniqueItems: true
+          items:
+            type: string
+            enum: [Match, RegularExpression, Mirror, MirrorPercent]
         resources:
           type: array
           description: |
@@ -12512,6 +12523,8 @@ components:
           type: object
           description: Values for the parameter schema declared on the referenced (Cluster)EndpointType. Validated by the controller.
           additionalProperties: true
+        rollout:
+          $ref: '#/components/schemas/EndpointRollout'
 
     EndpointBackendRef:
       type: object
@@ -12645,6 +12658,93 @@ components:
           minimum: 0
           maximum: 100
           example: 10
+
+
+    EndpointRollout:
+      type: object
+      description: |
+        The plan for moving traffic from a stable backend to candidate backends.
+        Clients turn each step into an environment's backendOverrides. The
+        controller doesn't read it, and it isn't part of a release.
+      required:
+        - strategy
+        - stable
+        - candidates
+      properties:
+        strategy:
+          type: string
+          description: How traffic moves. canary and mirror carry their steps in the block of the same name.
+          enum: [canary, blueGreen, abTest, mirror]
+          example: canary
+        stable:
+          type: string
+          description: The backend serving now. Aborting returns its traffic to it.
+          minLength: 1
+          maxLength: 63
+          example: stable
+        candidates:
+          type: array
+          description: The backend being rolled out. A list so a rollout can later take several.
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            required:
+              - name
+            properties:
+              name:
+                type: string
+                description: Name of the backend in backendRefs.
+                minLength: 1
+                maxLength: 63
+                example: canary
+        canary:
+          $ref: '#/components/schemas/EndpointRolloutSteps'
+        mirror:
+          $ref: '#/components/schemas/EndpointRolloutSteps'
+
+    EndpointRolloutSteps:
+      type: object
+      description: The steps of a rollout, in order.
+      required:
+        - steps
+      properties:
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/EndpointRolloutStep'
+
+    EndpointRolloutStep:
+      type: object
+      description: The share each candidate gets at one step. Shares add up to at most 100.
+      required:
+        - backends
+      properties:
+        backends:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            required:
+              - name
+              - percent
+            properties:
+              name:
+                type: string
+                description: Name of the candidate.
+                minLength: 1
+                maxLength: 63
+                example: canary
+              percent:
+                type: integer
+                format: int32
+                description: The candidate's share of the traffic stable had, or for a mirror rollout the share of requests copied to it.
+                minimum: 0
+                maximum: 100
+                example: 25
 
     EndpointComponentBackend:
       type: object
@@ -13072,6 +13172,7 @@ components:
               type: string
               example: api-key
 
+
     ResolvedEndpointBackend:
       type: object
       description: Resolution of one backendRef in the binding's environment, populated by the binding controller.
@@ -13118,7 +13219,7 @@ components:
           description: When the controller first observed the binding's current spec, such as a new endpointRelease being deployed.
         conditions:
           type: array
-          description: Latest available observations of the binding's state. Includes BackendsResolved, Synced, ResourcesReady, URLsResolved, Ready (aggregate), and Finalizing.
+          description: Latest available observations of the binding's state. Includes BackendsResolved, BackendOverridesApplied, Synced, ResourcesReady, URLsResolved, Ready (aggregate), and Finalizing.
           items:
             $ref: '#/components/schemas/Condition'
         backends:

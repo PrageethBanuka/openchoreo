@@ -218,6 +218,14 @@ const (
 	EndpointReleaseSpecVisibilityNamespace EndpointReleaseSpecVisibility = "namespace"
 )
 
+// Defines values for EndpointRolloutStrategy.
+const (
+	EndpointRolloutStrategyAbTest    EndpointRolloutStrategy = "abTest"
+	EndpointRolloutStrategyBlueGreen EndpointRolloutStrategy = "blueGreen"
+	EndpointRolloutStrategyCanary    EndpointRolloutStrategy = "canary"
+	EndpointRolloutStrategyMirror    EndpointRolloutStrategy = "mirror"
+)
+
 // Defines values for EndpointSecurityApiKeyIn.
 const (
 	EndpointApiKeyInHeader EndpointSecurityApiKeyIn = "header"
@@ -243,6 +251,14 @@ const (
 const (
 	EndpointTypeRefKindClusterEndpointType EndpointTypeRefKind = "ClusterEndpointType"
 	EndpointTypeRefKindEndpointType        EndpointTypeRefKind = "EndpointType"
+)
+
+// Defines values for EndpointTypeSpecCapabilities.
+const (
+	EndpointTypeSpecCapabilitiesMatch             EndpointTypeSpecCapabilities = "Match"
+	EndpointTypeSpecCapabilitiesMirror            EndpointTypeSpecCapabilities = "Mirror"
+	EndpointTypeSpecCapabilitiesMirrorPercent     EndpointTypeSpecCapabilities = "MirrorPercent"
+	EndpointTypeSpecCapabilitiesRegularExpression EndpointTypeSpecCapabilities = "RegularExpression"
 )
 
 // Defines values for EndpointTypeSpecResourcesTargetPlane.
@@ -2374,7 +2390,7 @@ type EndpointReleaseBindingStatus struct {
 	// Backends Resolution of each backendRef in this binding's environment.
 	Backends *[]ResolvedEndpointBackend `json:"backends,omitempty"`
 
-	// Conditions Latest available observations of the binding's state. Includes BackendsResolved, Synced, ResourcesReady, URLsResolved, Ready (aggregate), and Finalizing.
+	// Conditions Latest available observations of the binding's state. Includes BackendsResolved, BackendOverridesApplied, Synced, ResourcesReady, URLsResolved, Ready (aggregate), and Finalizing.
 	Conditions *[]Condition `json:"conditions,omitempty"`
 
 	// LastSpecUpdateTime When the controller first observed the binding's current spec, such as a new endpointRelease being deployed.
@@ -2453,6 +2469,48 @@ type EndpointReleaseSpecEndpointTypeKind string
 // EndpointReleaseSpecVisibility defines model for EndpointReleaseSpec.Visibility.
 type EndpointReleaseSpecVisibility string
 
+// EndpointRollout The plan for moving traffic from a stable backend to candidate backends.
+// Clients turn each step into an environment's backendOverrides. The
+// controller doesn't read it, and it isn't part of a release.
+type EndpointRollout struct {
+	// Canary The steps of a rollout, in order.
+	Canary *EndpointRolloutSteps `json:"canary,omitempty"`
+
+	// Candidates The backend being rolled out. A list so a rollout can later take several.
+	Candidates []struct {
+		// Name Name of the backend in backendRefs.
+		Name string `json:"name"`
+	} `json:"candidates"`
+
+	// Mirror The steps of a rollout, in order.
+	Mirror *EndpointRolloutSteps `json:"mirror,omitempty"`
+
+	// Stable The backend serving now. Aborting returns its traffic to it.
+	Stable string `json:"stable"`
+
+	// Strategy How traffic moves. canary and mirror carry their steps in the block of the same name.
+	Strategy EndpointRolloutStrategy `json:"strategy"`
+}
+
+// EndpointRolloutStrategy How traffic moves. canary and mirror carry their steps in the block of the same name.
+type EndpointRolloutStrategy string
+
+// EndpointRolloutStep The share each candidate gets at one step. Shares add up to at most 100.
+type EndpointRolloutStep struct {
+	Backends []struct {
+		// Name Name of the candidate.
+		Name string `json:"name"`
+
+		// Percent The candidate's share of the traffic stable had, or for a mirror rollout the share of requests copied to it.
+		Percent int32 `json:"percent"`
+	} `json:"backends"`
+}
+
+// EndpointRolloutSteps The steps of a rollout, in order.
+type EndpointRolloutSteps struct {
+	Steps []EndpointRolloutStep `json:"steps"`
+}
+
 // EndpointSecurity Security enforced at a URL, as declared by the EndpointType.
 type EndpointSecurity struct {
 	ApiKey *struct {
@@ -2499,6 +2557,11 @@ type EndpointSpec struct {
 
 	// Parameters Values for the parameter schema declared on the referenced (Cluster)EndpointType. Validated by the controller.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
+
+	// Rollout The plan for moving traffic from a stable backend to candidate backends.
+	// Clients turn each step into an environment's backendOverrides. The
+	// controller doesn't read it, and it isn't part of a release.
+	Rollout *EndpointRollout `json:"rollout,omitempty"`
 
 	// Schema API definition this Endpoint exposes. When unset it resolves from the backend's workload endpoint schema.
 	Schema *struct {
@@ -2577,6 +2640,11 @@ type EndpointTypeRefKind string
 
 // EndpointTypeSpec Desired state of a (Cluster)EndpointType.
 type EndpointTypeSpec struct {
+	// Capabilities Routing features this type renders beyond weighted backends. An Endpoint
+	// that uses one the type doesn't list is not released. Unset means the
+	// type doesn't declare them, and nothing is checked.
+	Capabilities *[]EndpointTypeSpecCapabilities `json:"capabilities,omitempty"`
+
 	// EnvironmentConfigs Schema section using openAPIV3Schema format
 	EnvironmentConfigs *SchemaSection `json:"environmentConfigs,omitempty"`
 
@@ -2615,6 +2683,9 @@ type EndpointTypeSpec struct {
 	// Validations CEL-based validation rules evaluated before rendering.
 	Validations *[]ValidationRule `json:"validations,omitempty"`
 }
+
+// EndpointTypeSpecCapabilities defines model for EndpointTypeSpec.Capabilities.
+type EndpointTypeSpecCapabilities string
 
 // EndpointTypeSpecResourcesTargetPlane Target plane for deployment. Endpoint types may only target the data plane.
 type EndpointTypeSpecResourcesTargetPlane string
