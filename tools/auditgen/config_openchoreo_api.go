@@ -36,6 +36,28 @@ var apiApplyWorkloadOverride = auditgen.OperationDef{
 	Category: "CategoryManagement", RESTResourceParam: "workloadName",
 }
 
+// apiEndpointRolloutOverrides audit the rollout calls on an Endpoint. Each
+// writes the Endpoint or one of its EndpointReleaseBindings, and the verb is
+// the path's last segment, which the generic derivation can't name.
+var apiEndpointRolloutOverrides = []auditgen.OperationDef{
+	{
+		ID: "StartEndpointRollout", Action: "start_endpoint_rollout", ResourceType: "endpoint",
+		Category: "CategoryManagement", RESTResourceParam: "endpointName",
+	},
+	{
+		ID: "StepEndpointRollout", Action: "step_endpoint_rollout", ResourceType: "endpoint",
+		Category: "CategoryManagement", RESTResourceParam: "endpointName",
+	},
+	{
+		ID: "AbortEndpointRollout", Action: "abort_endpoint_rollout", ResourceType: "endpoint",
+		Category: "CategoryManagement", RESTResourceParam: "endpointName",
+	},
+	{
+		ID: "FinishEndpointRollout", Action: "finish_endpoint_rollout", ResourceType: "endpoint",
+		Category: "CategoryManagement", RESTResourceParam: "endpointName",
+	},
+}
+
 // apiAccessReadOverrides define the reads audited for what they disclose:
 // secret values and live container logs. Derivation has no verb for a GET, so
 // an override is the only way a read gets a definition.
@@ -134,6 +156,9 @@ func apiConfig() auditgen.Config {
 	overrides := map[string]auditgen.OperationDef{
 		apiGenerateReleaseOverride.ID: apiGenerateReleaseOverride,
 		apiApplyWorkloadOverride.ID:   apiApplyWorkloadOverride,
+	}
+	for _, def := range apiEndpointRolloutOverrides {
+		overrides[def.ID] = def
 	}
 	for _, def := range apiAccessReadOverrides {
 		overrides[def.ID] = def

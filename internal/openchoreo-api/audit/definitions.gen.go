@@ -19,6 +19,10 @@ import (
 func generatedOperationDefs() []audit.OperationDef {
 	return []audit.OperationDef{
 		{
+			ID: "AbortEndpointRollout", Action: "abort_endpoint_rollout", ResourceType: "endpoint",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
+		},
+		{
 			ID: "ApplyWorkload", Action: "apply_workload", ResourceType: "workload",
 			Category: audit.CategoryManagement, RESTResourceParam: "workloadName",
 		},
@@ -375,6 +379,10 @@ func generatedOperationDefs() []audit.OperationDef {
 			Category: audit.CategoryManagement, RESTResourceParam: "workloadName",
 		},
 		{
+			ID: "FinishEndpointRollout", Action: "finish_endpoint_rollout", ResourceType: "endpoint",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
+		},
+		{
 			ID: "GenerateRelease", Action: "generate_release", ResourceType: "componentrelease",
 			Category: audit.CategoryManagement,
 		},
@@ -393,6 +401,14 @@ func generatedOperationDefs() []audit.OperationDef {
 		{
 			ID: "ListSecrets", Action: "list_secrets", ResourceType: "secret",
 			Category: audit.CategoryAccess,
+		},
+		{
+			ID: "StartEndpointRollout", Action: "start_endpoint_rollout", ResourceType: "endpoint",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
+		},
+		{
+			ID: "StepEndpointRollout", Action: "step_endpoint_rollout", ResourceType: "endpoint",
+			Category: audit.CategoryManagement, RESTResourceParam: "endpointName",
 		},
 		{
 			ID: "TriggerReleaseBindingCronJob", Action: "trigger_release_binding_cron_job", ResourceType: "releasebinding",
