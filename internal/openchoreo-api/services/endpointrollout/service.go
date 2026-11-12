@@ -218,8 +218,9 @@ func (s *service) renderable(ctx context.Context, namespaceName string, ep *open
 		declared = t.Spec.Capabilities
 	}
 	problems := endpointpipeline.CapabilityProblems(declared, ep.Spec.BackendRefs)
-	if len(declared) > 0 && !slices.Contains(declared, openchoreov1alpha1.EndpointCapabilityMirrorPercent) &&
-		mirrorsAShare(ep.Spec.Rollout) {
+	if slices.Contains(declared, openchoreov1alpha1.EndpointCapabilityMirror) &&
+		!slices.Contains(declared, openchoreov1alpha1.EndpointCapabilityMirrorPercent) &&
+		len(problems) == 0 && mirrorsAShare(ep.Spec.Rollout) {
 		problems = append(problems, fmt.Sprintf("a mirror step below 100%% needs the %s capability",
 			openchoreov1alpha1.EndpointCapabilityMirrorPercent))
 	}

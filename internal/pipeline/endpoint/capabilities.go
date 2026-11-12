@@ -18,25 +18,25 @@ func CapabilityProblems(declared []openchoreov1alpha1.EndpointCapability, backen
 		return nil
 	}
 	var problems []string
-	need := func(c openchoreov1alpha1.EndpointCapability, ref openchoreov1alpha1.EndpointBackendRef, what string) {
-		if !slices.Contains(declared, c) {
-			problems = append(problems, fmt.Sprintf("backend %q: %s needs the %s capability", ref.Name, what, c))
+	// need reports whether the type declares c; a refinement of a feature
+	// the type lacks is not reported on its own.
+	need := func(c openchoreov1alpha1.EndpointCapability, ref openchoreov1alpha1.EndpointBackendRef, what string) bool {
+		if slices.Contains(declared, c) {
+			return true
 		}
+		problems = append(problems, fmt.Sprintf("backend %q: %s needs the %s capability", ref.Name, what, c))
+		return false
 	}
 	for _, ref := range backendRefs {
-		if ref.Match != nil {
-			need(openchoreov1alpha1.EndpointCapabilityMatch, ref, "a match")
-			if slices.ContainsFunc(ref.Match.Headers, func(h openchoreov1alpha1.EndpointHeaderMatch) bool {
+		if ref.Match != nil && need(openchoreov1alpha1.EndpointCapabilityMatch, ref, "a match") &&
+			slices.ContainsFunc(ref.Match.Headers, func(h openchoreov1alpha1.EndpointHeaderMatch) bool {
 				return h.Type == openchoreov1alpha1.EndpointHeaderMatchRegularExpression
 			}) {
-				need(openchoreov1alpha1.EndpointCapabilityRegularExpression, ref, "a regular expression header match")
-			}
+			need(openchoreov1alpha1.EndpointCapabilityRegularExpression, ref, "a regular expression header match")
 		}
-		if ref.Mirror != nil {
-			need(openchoreov1alpha1.EndpointCapabilityMirror, ref, "a mirror")
-			if ref.Mirror.Percent < 100 {
-				need(openchoreov1alpha1.EndpointCapabilityMirrorPercent, ref, "mirroring a share of requests")
-			}
+		if ref.Mirror != nil && need(openchoreov1alpha1.EndpointCapabilityMirror, ref, "a mirror") &&
+			ref.Mirror.Percent < 100 {
+			need(openchoreov1alpha1.EndpointCapabilityMirrorPercent, ref, "mirroring a share of requests")
 		}
 	}
 	return problems

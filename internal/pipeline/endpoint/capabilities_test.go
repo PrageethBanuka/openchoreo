@@ -32,8 +32,12 @@ func TestCapabilityProblems(t *testing.T) {
 		t.Fatalf("every feature is declared, got %v", got)
 	}
 	got := CapabilityProblems([]openchoreov1alpha1.EndpointCapability{openchoreov1alpha1.EndpointCapabilityMatch}, refs)
-	if len(got) != 3 {
-		t.Fatalf("want problems for the regex, the mirror and its share, got %v", got)
+	if len(got) != 2 {
+		t.Fatalf("want problems for the regex and the mirror, not its share, got %v", got)
+	}
+	got = CapabilityProblems([]openchoreov1alpha1.EndpointCapability{openchoreov1alpha1.EndpointCapabilityMirror}, refs)
+	if len(got) != 2 {
+		t.Fatalf("want problems for the match and the mirror's share, not the regex, got %v", got)
 	}
 
 	shadow.Mirror.Percent = 100
