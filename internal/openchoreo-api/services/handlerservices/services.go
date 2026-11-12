@@ -157,6 +157,7 @@ func NewServices(k8sClient client.Client, pap authzcore.PAP, pdp authzcore.PDP, 
 		WorkloadService:                               workloadsvc.NewServiceWithAuthz(k8sClient, pdp, logger.With("component", "workload-service")),
 	}
 	svcs.EndpointRolloutService = endpointrolloutsvc.NewService(svcs.EndpointService, svcs.EndpointReleaseService,
-		svcs.EndpointReleaseBindingService, logger.With("component", "endpointrollout-service"))
+		svcs.EndpointReleaseBindingService, endpointtypesvc.NewService(k8sClient, logger),
+		clusterendpointtypesvc.NewService(k8sClient, logger), logger.With("component", "endpointrollout-service"))
 	return svcs
 }

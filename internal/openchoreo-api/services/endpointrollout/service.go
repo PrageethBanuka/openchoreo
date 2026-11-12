@@ -23,9 +23,12 @@ import (
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
+	clusterendpointtypesvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/clusterendpointtype"
 	endpointsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpoint"
 	endpointreleasesvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointrelease"
 	endpointreleasebindingsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointreleasebinding"
+	endpointtypesvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointtype"
+	endpointpipeline "github.com/openchoreo/openchoreo/internal/pipeline/endpoint"
 	"github.com/openchoreo/openchoreo/pkg/endpointrollout"
 )
 
@@ -115,23 +118,31 @@ type Change struct {
 }
 
 type service struct {
-	endpoints endpointsvc.Service
-	releases  endpointreleasesvc.Service
-	bindings  endpointreleasebindingsvc.Service
-	logger    *slog.Logger
+	endpoints    endpointsvc.Service
+	releases     endpointreleasesvc.Service
+	bindings     endpointreleasebindingsvc.Service
+	types        endpointtypesvc.Service
+	clusterTypes clusterendpointtypesvc.Service
+	logger       *slog.Logger
 }
 
 var _ Service = (*service)(nil)
 
 // NewService creates the rollout service. Plan changes need endpoint update
-// and steps need binding update in the environment.
+// and steps need binding update in the environment. The type services only
+// read what a type can render, so they are passed without authorization.
 func NewService(
 	endpoints endpointsvc.Service,
 	releases endpointreleasesvc.Service,
 	bindings endpointreleasebindingsvc.Service,
+	types endpointtypesvc.Service,
+	clusterTypes clusterendpointtypesvc.Service,
 	logger *slog.Logger,
 ) Service {
-	return &service{endpoints: endpoints, releases: releases, bindings: bindings, logger: logger}
+	return &service{
+		endpoints: endpoints, releases: releases, bindings: bindings,
+		types: types, clusterTypes: clusterTypes, logger: logger,
+	}
 }
 
 // environment is the binding a step changes, read with the Endpoint's other
@@ -175,7 +186,64 @@ func (s *service) start(ctx context.Context, namespaceName, endpointName string,
 		}
 	}
 	ep.Spec.Rollout = req.Rollout.DeepCopy()
+	if err := s.renderable(ctx, namespaceName, ep); err != nil {
+		return nil, err
+	}
 	return s.writeEndpoint(ctx, namespaceName, ep, req.DryRun)
+}
+
+// renderable refuses a rollout that uses a routing feature the Endpoint's
+// type does not declare, which the controller would refuse to release. A type
+// that can't be read is left for the controller to report.
+func (s *service) renderable(ctx context.Context, namespaceName string, ep *openchoreov1alpha1.Endpoint) error {
+	var declared []openchoreov1alpha1.EndpointCapability
+	switch ref := ep.Spec.Type; ref.Kind {
+	case openchoreov1alpha1.EndpointTypeRefKindClusterEndpointType:
+		t, err := s.clusterTypes.GetClusterEndpointType(ctx, ref.Name)
+		if errors.Is(err, clusterendpointtypesvc.ErrClusterEndpointTypeNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		declared = t.Spec.Capabilities
+	default:
+		t, err := s.types.GetEndpointType(ctx, namespaceName, ref.Name)
+		if errors.Is(err, endpointtypesvc.ErrEndpointTypeNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		declared = t.Spec.Capabilities
+	}
+	problems := endpointpipeline.CapabilityProblems(declared, ep.Spec.BackendRefs)
+	if len(declared) > 0 && !slices.Contains(declared, openchoreov1alpha1.EndpointCapabilityMirrorPercent) &&
+		mirrorsAShare(ep.Spec.Rollout) {
+		problems = append(problems, fmt.Sprintf("a mirror step below 100%% needs the %s capability",
+			openchoreov1alpha1.EndpointCapabilityMirrorPercent))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return &services.ValidationError{Msg: fmt.Sprintf("%s %q can't render this rollout: %s",
+		ep.Spec.Type.Kind, ep.Spec.Type.Name, strings.Join(problems, "; "))}
+}
+
+// mirrorsAShare reports whether a mirror plan copies part of the requests at
+// some step.
+func mirrorsAShare(r *openchoreov1alpha1.EndpointRollout) bool {
+	if r == nil || r.Strategy != openchoreov1alpha1.EndpointRolloutMirror || r.Mirror == nil {
+		return false
+	}
+	for _, st := range r.Mirror.Steps {
+		for _, b := range st.Backends {
+			if b.Percent > 0 && b.Percent < 100 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *service) Step(ctx context.Context, namespaceName, endpointName string, req StepRequest) (*Status, error) {

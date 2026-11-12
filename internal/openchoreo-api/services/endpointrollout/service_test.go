@@ -16,9 +16,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
+	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
+	clusterendpointtypesvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/clusterendpointtype"
 	endpointsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpoint"
 	endpointreleasesvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointrelease"
 	endpointreleasebindingsvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointreleasebinding"
+	endpointtypesvc "github.com/openchoreo/openchoreo/internal/openchoreo-api/services/endpointtype"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services/testutil"
 )
 
@@ -82,7 +85,8 @@ func interceptedFixture(t *testing.T, withPlan bool, funcs func(store client.Wit
 	}
 	logger := testutil.TestLogger()
 	return NewService(endpointsvc.NewService(c, logger), endpointreleasesvc.NewService(c, logger),
-		endpointreleasebindingsvc.NewService(c, logger), logger), c
+		endpointreleasebindingsvc.NewService(c, logger), endpointtypesvc.NewService(c, logger),
+		clusterendpointtypesvc.NewService(c, logger), logger), c
 }
 
 func overridesOf(t *testing.T, c client.Client) map[string]int32 {
@@ -330,4 +334,73 @@ func TestStep_ReadsEachReleaseAndTheBindingsOnce(t *testing.T) {
 	assert.Equal(t, 1, releaseGets, "both environments run the same release")
 	assert.Equal(t, 1, bindingLists)
 	assert.Equal(t, map[string]int32{"stable": 95, "v2": 5}, overridesOf(t, c))
+}
+
+// withType stores the fixture Endpoint's type, declaring the given
+// capabilities.
+func withType(t *testing.T, c client.Client, capabilities ...openchoreov1alpha1.EndpointCapability) {
+	t.Helper()
+	et := testutil.NewEndpointType(ns, "http-gateway")
+	et.Spec.Capabilities = capabilities
+	require.NoError(t, c.Create(context.Background(), et))
+}
+
+func mirrorStart(percents ...int32) StartRequest {
+	steps := make([]openchoreov1alpha1.EndpointRolloutStep, 0, len(percents))
+	for _, p := range percents {
+		steps = append(steps, openchoreov1alpha1.EndpointRolloutStep{
+			Backends: []openchoreov1alpha1.EndpointRolloutStepBackend{{Name: "v2", Percent: p}},
+		})
+	}
+	shadow := candidate()
+	shadow.Match = nil
+	shadow.Mirror = &openchoreov1alpha1.EndpointMirror{Percent: 100}
+	return StartRequest{
+		Rollout: openchoreov1alpha1.EndpointRollout{
+			Strategy:   openchoreov1alpha1.EndpointRolloutMirror,
+			Stable:     "stable",
+			Candidates: []openchoreov1alpha1.EndpointRolloutCandidate{{Name: "v2"}},
+			Mirror:     &openchoreov1alpha1.EndpointRolloutSteps{Steps: steps},
+		},
+		Backends: []openchoreov1alpha1.EndpointBackendRef{shadow},
+	}
+}
+
+func TestStart_RefusesWhatTheTypeCannotRender(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, false)
+	withType(t, c, openchoreov1alpha1.EndpointCapabilityMatch)
+
+	_, err := svc.Start(ctx, ns, epName, mirrorStart(100))
+	var validationErr *services.ValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Contains(t, validationErr.Msg, `EndpointType "http-gateway" can't render this rollout`)
+	assert.Contains(t, validationErr.Msg, "Mirror capability")
+
+	ep := &openchoreov1alpha1.Endpoint{}
+	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: ns, Name: epName}, ep))
+	assert.Nil(t, ep.Spec.Rollout, "nothing is saved")
+
+	_, err = svc.Start(ctx, ns, epName, StartRequest{Rollout: canaryPlan()})
+	assert.NoError(t, err, "a canary whose testers match a header needs only Match")
+}
+
+func TestStart_MirrorShareNeedsMirrorPercent(t *testing.T) {
+	svc, c := fixture(t, false)
+	withType(t, c, openchoreov1alpha1.EndpointCapabilityMirror)
+
+	_, err := svc.Start(context.Background(), ns, epName, mirrorStart(10, 100))
+	var validationErr *services.ValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Contains(t, validationErr.Msg, "MirrorPercent")
+
+	_, err = svc.Start(context.Background(), ns, epName, mirrorStart(100))
+	assert.NoError(t, err, "mirroring every request needs only Mirror")
+}
+
+func TestStart_TypeWithoutCapabilitiesIsNotChecked(t *testing.T) {
+	svc, c := fixture(t, false)
+	withType(t, c)
+	_, err := svc.Start(context.Background(), ns, epName, mirrorStart(10, 100))
+	assert.NoError(t, err)
 }
