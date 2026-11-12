@@ -15,8 +15,10 @@ import (
 	"slices"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/util/retry"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
@@ -146,6 +148,10 @@ func (s *service) Get(ctx context.Context, namespaceName, endpointName string) (
 }
 
 func (s *service) Start(ctx context.Context, namespaceName, endpointName string, req StartRequest) (*Status, error) {
+	return onFresh(func() (*Status, error) { return s.start(ctx, namespaceName, endpointName, req) })
+}
+
+func (s *service) start(ctx context.Context, namespaceName, endpointName string, req StartRequest) (*Status, error) {
 	ep, err := s.endpoints.GetEndpoint(ctx, namespaceName, endpointName)
 	if err != nil {
 		return nil, err
@@ -165,6 +171,10 @@ func (s *service) Start(ctx context.Context, namespaceName, endpointName string,
 }
 
 func (s *service) Step(ctx context.Context, namespaceName, endpointName string, req StepRequest) (*Status, error) {
+	return onFresh(func() (*Status, error) { return s.step(ctx, namespaceName, endpointName, req) })
+}
+
+func (s *service) step(ctx context.Context, namespaceName, endpointName string, req StepRequest) (*Status, error) {
 	ep, err := s.requireRollout(ctx, namespaceName, endpointName)
 	if err != nil {
 		return nil, err
@@ -200,19 +210,36 @@ func (s *service) Abort(ctx context.Context, namespaceName, endpointName string,
 }
 
 func (s *service) Finish(ctx context.Context, namespaceName, endpointName string, req FinishRequest) (*Status, error) {
+	var leaving []string
+	status, err := onFresh(func() (*Status, error) {
+		var status *Status
+		var err error
+		status, leaving, err = s.finish(ctx, namespaceName, endpointName, req)
+		return status, err
+	})
+	if err != nil || req.DryRun {
+		return status, err
+	}
+	if err := s.dropMirrorOverrides(ctx, namespaceName, endpointName, leaving); err != nil {
+		return nil, err
+	}
+	return status, nil
+}
+
+func (s *service) finish(ctx context.Context, namespaceName, endpointName string, req FinishRequest) (*Status, []string, error) {
 	ep, err := s.requireRollout(ctx, namespaceName, endpointName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r := ep.Spec.Rollout
 	refs, leaving, err := endpointrollout.Finish(r, ep.Spec.BackendRefs, req.Keep)
 	if err != nil {
-		return nil, &services.ValidationError{Msg: err.Error()}
+		return nil, nil, &services.ValidationError{Msg: err.Error()}
 	}
 	if r.Strategy != openchoreov1alpha1.EndpointRolloutABTest {
 		bindings, err := s.listBindings(ctx, namespaceName, ep.Name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var serving []string
 		for i := range bindings {
@@ -223,19 +250,39 @@ func (s *service) Finish(ctx context.Context, namespaceName, endpointName string
 			}
 		}
 		if len(serving) > 0 {
-			return nil, conflict("%s still gets traffic; move it to 0%% there first", strings.Join(serving, ", "))
+			return nil, nil, conflict("%s still gets traffic; move it to 0%% there first", strings.Join(serving, ", "))
 		}
 	}
 	ep.Spec.BackendRefs = refs
 	ep.Spec.Rollout = nil
 	status, err := s.writeEndpoint(ctx, namespaceName, ep, req.DryRun)
-	if err != nil || req.DryRun {
-		return status, err
+	return status, leaving, err
+}
+
+// onFresh runs a call again from a fresh read when what it read changed
+// before it saved, so it never saves over someone else's change. A conflict
+// that outlasts the retries is refused as one.
+func onFresh(call func() (*Status, error)) (*Status, error) {
+	var status *Status
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		status, err = call()
+		return err
+	})
+	if apierrors.IsConflict(err) {
+		return nil, conflict("the Endpoint changed while saving; check its status and retry")
 	}
-	if err := s.dropMirrorOverrides(ctx, namespaceName, ep.Name, leaving); err != nil {
-		return nil, err
+	return status, err
+}
+
+// unchanged reports a conflict when the stored object moved past the one a
+// call read, since the update services save the whole spec they are given.
+func unchanged(read, stored metav1.Object, resource string) error {
+	if read.GetResourceVersion() == stored.GetResourceVersion() {
+		return nil
 	}
-	return status, nil
+	return apierrors.NewConflict(schema.GroupResource{Group: openchoreov1alpha1.GroupVersion.Group, Resource: resource},
+		read.GetName(), errors.New("it changed since it was read"))
 }
 
 // dropMirrorOverrides removes the mirror shares the rollout set on the
@@ -325,6 +372,13 @@ func (s *service) setStage(
 	}
 	change := &Change{Environment: env.binding.Spec.Environment, Before: before, After: after}
 	if !dryRun {
+		stored, err := s.bindings.GetEndpointReleaseBinding(ctx, namespaceName, env.binding.Name)
+		if err != nil {
+			return nil, err
+		}
+		if err := unchanged(env.binding, stored, "endpointreleasebindings"); err != nil {
+			return nil, err
+		}
 		env.binding.Spec.BackendOverrides = after
 		if _, err := s.bindings.UpdateEndpointReleaseBinding(ctx, namespaceName, env.binding); err != nil {
 			return nil, err
@@ -348,6 +402,13 @@ func (s *service) writeEndpoint(ctx context.Context, namespaceName string, ep *o
 		}
 		status.Change = &Change{Endpoint: &ep.Spec}
 		return status, nil
+	}
+	stored, err := s.endpoints.GetEndpoint(ctx, namespaceName, ep.Name)
+	if err != nil {
+		return nil, err
+	}
+	if err := unchanged(ep, stored, "endpoints"); err != nil {
+		return nil, err
 	}
 	updated, err := s.endpoints.UpdateEndpoint(ctx, namespaceName, ep)
 	if err != nil {
