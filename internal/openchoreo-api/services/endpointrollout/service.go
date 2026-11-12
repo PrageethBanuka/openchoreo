@@ -134,10 +134,18 @@ func NewService(
 	return &service{endpoints: endpoints, releases: releases, bindings: bindings, logger: logger}
 }
 
+// environment is the binding a step changes, read with the Endpoint's other
+// bindings and their releases so the step's status needs no second read.
 type environment struct {
-	binding *openchoreov1alpha1.EndpointReleaseBinding
-	refs    []openchoreov1alpha1.EndpointBackendRef
+	binding  *openchoreov1alpha1.EndpointReleaseBinding
+	refs     []openchoreov1alpha1.EndpointBackendRef
+	bindings []openchoreov1alpha1.EndpointReleaseBinding
+	releases releases
 }
+
+// releases holds the backends of each release a call has read, by name, so
+// environments on the same release read it once.
+type releases map[string][]openchoreov1alpha1.EndpointBackendRef
 
 func (s *service) Get(ctx context.Context, namespaceName, endpointName string) (*Status, error) {
 	ep, err := s.endpoints.GetEndpoint(ctx, namespaceName, endpointName)
@@ -380,13 +388,15 @@ func (s *service) setStage(
 			return nil, err
 		}
 		env.binding.Spec.BackendOverrides = after
-		if _, err := s.bindings.UpdateEndpointReleaseBinding(ctx, namespaceName, env.binding); err != nil {
+		updated, err := s.bindings.UpdateEndpointReleaseBinding(ctx, namespaceName, env.binding)
+		if err != nil {
 			return nil, err
 		}
+		*env.binding = *updated
 		s.logger.Info("Endpoint rollout stepped", "namespace", namespaceName, "endpoint", ep.Name,
 			"environment", env.binding.Spec.Environment, "step", stage.Index)
 	}
-	status, err := s.status(ctx, namespaceName, ep)
+	status, err := s.statusOf(ctx, namespaceName, ep, env.bindings, env.releases)
 	if err != nil {
 		return nil, err
 	}
@@ -434,33 +444,43 @@ func (s *service) environment(ctx context.Context, namespaceName string, ep *ope
 	if err != nil {
 		return nil, err
 	}
+	read := releases{}
 	for i := range bindings {
 		if bindings[i].Spec.Environment != name {
 			continue
 		}
-		refs, err := s.releaseRefs(ctx, namespaceName, &bindings[i])
+		refs, err := s.releaseRefs(ctx, namespaceName, &bindings[i], read)
 		if err != nil {
 			return nil, err
 		}
-		return &environment{binding: &bindings[i], refs: refs}, nil
+		return &environment{binding: &bindings[i], refs: refs, bindings: bindings, releases: read}, nil
 	}
 	return nil, fmt.Errorf("%w: %s is not deployed in %s", ErrEnvironmentNotBound, ep.Name, name)
 }
 
 // releaseRefs is the backends of the release an environment runs, which a
 // step's weights are computed against.
-func (s *service) releaseRefs(ctx context.Context, namespaceName string, b *openchoreov1alpha1.EndpointReleaseBinding) ([]openchoreov1alpha1.EndpointBackendRef, error) {
-	if b.Spec.EndpointRelease == "" {
+func (s *service) releaseRefs(
+	ctx context.Context, namespaceName string, b *openchoreov1alpha1.EndpointReleaseBinding, read releases,
+) ([]openchoreov1alpha1.EndpointBackendRef, error) {
+	name := b.Spec.EndpointRelease
+	if name == "" {
 		return nil, nil
 	}
-	release, err := s.releases.GetEndpointRelease(ctx, namespaceName, b.Spec.EndpointRelease)
-	if errors.Is(err, endpointreleasesvc.ErrEndpointReleaseNotFound) {
-		return nil, nil
+	if refs, ok := read[name]; ok {
+		return refs, nil
 	}
-	if err != nil {
+	var refs []openchoreov1alpha1.EndpointBackendRef
+	release, err := s.releases.GetEndpointRelease(ctx, namespaceName, name)
+	switch {
+	case errors.Is(err, endpointreleasesvc.ErrEndpointReleaseNotFound):
+	case err != nil:
 		return nil, err
+	default:
+		refs = release.Spec.BackendRefs
 	}
-	return release.Spec.BackendRefs, nil
+	read[name] = refs
+	return refs, nil
 }
 
 func (s *service) listBindings(ctx context.Context, namespaceName, endpointName string) ([]openchoreov1alpha1.EndpointReleaseBinding, error) {
@@ -484,6 +504,18 @@ func (s *service) status(ctx context.Context, namespaceName string, ep *openchor
 	if err != nil {
 		return nil, err
 	}
+	return s.statusOf(ctx, namespaceName, ep, bindings, releases{})
+}
+
+// statusOf is where each of the given bindings stands in the Endpoint's
+// rollout.
+func (s *service) statusOf(
+	ctx context.Context,
+	namespaceName string,
+	ep *openchoreov1alpha1.Endpoint,
+	bindings []openchoreov1alpha1.EndpointReleaseBinding,
+	read releases,
+) (*Status, error) {
 	status := &Status{Endpoint: ep.Name, Rollout: ep.Spec.Rollout, Environments: []EnvironmentStatus{}}
 	if ep.Status.LatestRelease != nil {
 		status.LatestRelease = ep.Status.LatestRelease.Name
@@ -509,7 +541,7 @@ func (s *service) status(ctx context.Context, namespaceName string, ep *openchor
 		}
 		env.Ready, env.Message = ready(b)
 		if r != nil {
-			refs, err := s.releaseRefs(ctx, namespaceName, b)
+			refs, err := s.releaseRefs(ctx, namespaceName, b, read)
 			if err != nil {
 				return nil, err
 			}

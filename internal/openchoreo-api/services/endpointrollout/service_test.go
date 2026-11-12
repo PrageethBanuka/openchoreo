@@ -300,3 +300,34 @@ func TestStart_ConflictBecomes409(t *testing.T) {
 	require.ErrorAs(t, err, &conflictErr)
 	assert.Contains(t, conflictErr.Msg, "changed while saving")
 }
+
+func TestStep_ReadsEachReleaseAndTheBindingsOnce(t *testing.T) {
+	ctx := context.Background()
+	releaseGets, bindingLists := 0, 0
+	svc, c := interceptedFixture(t, true, func(store client.WithWatch) interceptor.Funcs {
+		return interceptor.Funcs{
+			Get: func(ctx context.Context, _ client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*openchoreov1alpha1.EndpointRelease); ok {
+					releaseGets++
+				}
+				return store.Get(ctx, key, obj, opts...)
+			},
+			List: func(ctx context.Context, _ client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*openchoreov1alpha1.EndpointReleaseBindingList); ok {
+					bindingLists++
+				}
+				return store.List(ctx, list, opts...)
+			},
+		}
+	})
+	staging := testutil.NewEndpointReleaseBinding(ns, project, epName, "staging", epName+"-staging")
+	staging.Spec.EndpointRelease = release
+	require.NoError(t, c.Create(ctx, staging))
+
+	status, err := svc.Step(ctx, ns, epName, StepRequest{Environment: "dev"})
+	require.NoError(t, err)
+	assert.Len(t, status.Environments, 2)
+	assert.Equal(t, 1, releaseGets, "both environments run the same release")
+	assert.Equal(t, 1, bindingLists)
+	assert.Equal(t, map[string]int32{"stable": 95, "v2": 5}, overridesOf(t, c))
+}
