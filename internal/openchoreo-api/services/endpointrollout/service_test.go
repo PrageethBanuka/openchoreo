@@ -173,6 +173,26 @@ func TestFinish(t *testing.T) {
 	assert.Equal(t, "stable", ep.Spec.BackendRefs[0].Name)
 }
 
+func TestFinishDropsTheLeavingMirror(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, true)
+
+	b := &openchoreov1alpha1.EndpointReleaseBinding{}
+	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: ns, Name: epName + "-dev"}, b))
+	b.Spec.BackendOverrides = []openchoreov1alpha1.EndpointBackendOverride{
+		{Name: "stable", Weight: ptr(int32(100))},
+		{Name: "v2", Mirror: &openchoreov1alpha1.EndpointMirror{Percent: 100}},
+	}
+	require.NoError(t, c.Update(ctx, b))
+
+	_, err := svc.Finish(ctx, ns, epName, FinishRequest{Keep: "stable"})
+	require.NoError(t, err)
+
+	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: ns, Name: epName + "-dev"}, b))
+	assert.Equal(t, []openchoreov1alpha1.EndpointBackendOverride{{Name: "stable", Weight: ptr(int32(100))}},
+		b.Spec.BackendOverrides, "the stable weight stays until the release without v2 is deployed")
+}
+
 func TestNoRollout(t *testing.T) {
 	svc, _ := fixture(t, false)
 	_, err := svc.Step(context.Background(), ns, epName, StepRequest{Environment: "dev"})

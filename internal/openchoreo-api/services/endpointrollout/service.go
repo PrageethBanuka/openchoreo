@@ -17,6 +17,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/openchoreo-api/services"
@@ -227,7 +228,64 @@ func (s *service) Finish(ctx context.Context, namespaceName, endpointName string
 	}
 	ep.Spec.BackendRefs = refs
 	ep.Spec.Rollout = nil
-	return s.writeEndpoint(ctx, namespaceName, ep, req.DryRun)
+	status, err := s.writeEndpoint(ctx, namespaceName, ep, req.DryRun)
+	if err != nil || req.DryRun {
+		return status, err
+	}
+	if err := s.dropMirrorOverrides(ctx, namespaceName, ep.Name, leaving); err != nil {
+		return nil, err
+	}
+	return status, nil
+}
+
+// dropMirrorOverrides removes the mirror shares the rollout set on the
+// backends leaving the Endpoint, so a backend added again later doesn't
+// inherit them. Their weights stay: an environment still on the old release
+// routes by them until it is promoted. Each binding is read again on a
+// conflict, since autoDeploy may be moving it to the new release.
+func (s *service) dropMirrorOverrides(ctx context.Context, namespaceName, endpointName string, leaving []string) error {
+	bindings, err := s.listBindings(ctx, namespaceName, endpointName)
+	if err != nil {
+		return err
+	}
+	for i := range bindings {
+		name := bindings[i].Name
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			b, err := s.bindings.GetEndpointReleaseBinding(ctx, namespaceName, name)
+			if err != nil {
+				return err
+			}
+			kept, changed := withoutMirrors(b.Spec.BackendOverrides, leaving)
+			if !changed {
+				return nil
+			}
+			b.Spec.BackendOverrides = kept
+			_, err = s.bindings.UpdateEndpointReleaseBinding(ctx, namespaceName, b)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func withoutMirrors(
+	overrides []openchoreov1alpha1.EndpointBackendOverride, leaving []string,
+) ([]openchoreov1alpha1.EndpointBackendOverride, bool) {
+	kept := make([]openchoreov1alpha1.EndpointBackendOverride, 0, len(overrides))
+	changed := false
+	for _, o := range overrides {
+		if o.Mirror != nil && slices.Contains(leaving, o.Name) {
+			changed = true
+			if o.Weight == nil {
+				continue
+			}
+			o.Mirror = nil
+		}
+		kept = append(kept, o)
+	}
+	return kept, changed
 }
 
 // nextAfter is the first stage past the percents an environment was set to
