@@ -404,3 +404,132 @@ func TestStart_TypeWithoutCapabilitiesIsNotChecked(t *testing.T) {
 	_, err := svc.Start(context.Background(), ns, epName, mirrorStart(10, 100))
 	assert.NoError(t, err)
 }
+
+// serve sets what the dev binding reports each backend gets.
+func serve(t *testing.T, c client.Client, backends ...openchoreov1alpha1.ResolvedEndpointBackend) {
+	t.Helper()
+	b := &openchoreov1alpha1.EndpointReleaseBinding{}
+	require.NoError(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: epName + "-dev"}, b))
+	b.Status.Backends = backends
+	require.NoError(t, c.Update(context.Background(), b))
+}
+
+func deployed(name string, weight int32) openchoreov1alpha1.ResolvedEndpointBackend {
+	return openchoreov1alpha1.ResolvedEndpointBackend{Name: name, Weight: weight, Resolved: true}
+}
+
+func gone(name string, weight int32) openchoreov1alpha1.ResolvedEndpointBackend {
+	return openchoreov1alpha1.ResolvedEndpointBackend{
+		Name: name, Weight: weight, Reason: "NotDeployed",
+		Message: `component "greeter-v2" is not deployed in environment "dev"`,
+	}
+}
+
+func TestStep_RefusesTrafficToAnUndeployedBackend(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, true)
+	serve(t, c, deployed("stable", 100), gone("v2", 0))
+
+	_, err := svc.Step(ctx, ns, epName, StepRequest{Environment: "dev"})
+	var conflictErr *ConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Contains(t, conflictErr.Msg, `v2, which isn't deployed in dev (component "greeter-v2" is not deployed`)
+	assert.Empty(t, overridesOf(t, c), "nothing is saved")
+
+	_, err = svc.Step(ctx, ns, epName, StepRequest{Environment: "dev", DryRun: true})
+	require.ErrorAs(t, err, &conflictErr, "a dry run is refused the same way")
+
+	_, err = svc.Abort(ctx, ns, epName, AbortRequest{Environment: "dev"})
+	require.NoError(t, err, "moving traffic off it is allowed")
+	assert.Equal(t, map[string]int32{"stable": 100, "v2": 0}, overridesOf(t, c))
+}
+
+func TestAbort_RefusedWhenStableIsGone(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, true)
+	_, err := svc.Step(ctx, ns, epName, StepRequest{Environment: "dev"})
+	require.NoError(t, err)
+	serve(t, c, gone("stable", 95), deployed("v2", 5))
+
+	_, err = svc.Abort(ctx, ns, epName, AbortRequest{Environment: "dev"})
+	var conflictErr *ConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Contains(t, conflictErr.Msg, "stable, which isn't deployed in dev")
+
+	_, err = svc.Step(ctx, ns, epName, StepRequest{Environment: "dev", To: ptr(2)})
+	require.NoError(t, err, "the last step moves everything to the candidate")
+	assert.Equal(t, map[string]int32{"stable": 0, "v2": 100}, overridesOf(t, c))
+}
+
+func TestFinish_AfterTheCandidateIsGone(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, true)
+	_, err := svc.Step(ctx, ns, epName, StepRequest{Environment: "dev"})
+	require.NoError(t, err)
+	serve(t, c, deployed("stable", 95), gone("v2", 5))
+
+	_, err = svc.Finish(ctx, ns, epName, FinishRequest{Keep: "stable"})
+	var conflictErr *ConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Contains(t, conflictErr.Msg, "v2 in dev still gets traffic")
+
+	_, err = svc.Abort(ctx, ns, epName, AbortRequest{Environment: "dev"})
+	require.NoError(t, err)
+	serve(t, c, deployed("stable", 100), gone("v2", 0))
+
+	_, err = svc.Finish(ctx, ns, epName, FinishRequest{Keep: "stable"})
+	require.NoError(t, err)
+	ep := &openchoreov1alpha1.Endpoint{}
+	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: ns, Name: epName}, ep))
+	require.Len(t, ep.Spec.BackendRefs, 1)
+	assert.Equal(t, "stable", ep.Spec.BackendRefs[0].Name)
+}
+
+func stagingOn(t *testing.T, c client.Client, releaseName string) {
+	t.Helper()
+	b := testutil.NewEndpointReleaseBinding(ns, project, epName, "staging", epName+"-staging")
+	b.Spec.EndpointRelease = releaseName
+	require.NoError(t, c.Create(context.Background(), b))
+}
+
+func stagingOverrides(t *testing.T, c client.Client) []openchoreov1alpha1.EndpointBackendOverride {
+	t.Helper()
+	b := &openchoreov1alpha1.EndpointReleaseBinding{}
+	require.NoError(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: epName + "-staging"}, b))
+	return b.Spec.BackendOverrides
+}
+
+// A release promoted mid-rollout starts the next environment at 0%, and each
+// environment then moves on its own.
+func TestStep_EnvironmentsMoveIndependently(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, true)
+	stagingOn(t, c, release)
+
+	status, err := svc.Step(ctx, ns, epName, StepRequest{Environment: "dev"})
+	require.NoError(t, err)
+	steps := map[string]int{}
+	for _, e := range status.Environments {
+		steps[e.Environment] = *e.Step
+	}
+	assert.Equal(t, map[string]int{"dev": 1, "staging": 0}, steps)
+	assert.Empty(t, stagingOverrides(t, c))
+
+	_, err = svc.Step(ctx, ns, epName, StepRequest{Environment: "staging", ExpectedStep: ptr(0)})
+	require.NoError(t, err)
+	assert.Len(t, stagingOverrides(t, c), 2)
+	assert.Equal(t, map[string]int32{"stable": 95, "v2": 5}, overridesOf(t, c), "dev is unchanged")
+}
+
+func TestStep_RefusedAfterARollback(t *testing.T) {
+	ctx := context.Background()
+	svc, c := fixture(t, true)
+	old := testutil.NewEndpointRelease(ns, project, epName, epName+"-0")
+	require.NoError(t, c.Create(ctx, old))
+	stagingOn(t, c, old.Name)
+
+	_, err := svc.Step(ctx, ns, epName, StepRequest{Environment: "staging"})
+	var conflictErr *ConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	assert.Contains(t, conflictErr.Msg, "which has no backend v2")
+}

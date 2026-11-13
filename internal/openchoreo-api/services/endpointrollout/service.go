@@ -412,6 +412,45 @@ func withoutMirrors(
 	return kept, changed
 }
 
+// undeployed describes the rollout backends the overrides send traffic to
+// that the environment reports it can't resolve. The controller keeps the
+// last route while a backend with traffic is unresolved, so such a step would
+// not apply; one that moves traffic off it does.
+func undeployed(
+	r *openchoreov1alpha1.EndpointRollout,
+	binding *openchoreov1alpha1.EndpointReleaseBinding,
+	overrides []openchoreov1alpha1.EndpointBackendOverride,
+) []string {
+	inRollout := append([]string{r.Stable}, candidateNames(r)...)
+	var gone []string
+	for _, o := range overrides {
+		traffic := (o.Weight != nil && *o.Weight > 0) || (o.Mirror != nil && o.Mirror.Percent > 0)
+		if !traffic || !slices.Contains(inRollout, o.Name) {
+			continue
+		}
+		i := slices.IndexFunc(binding.Status.Backends, func(b openchoreov1alpha1.ResolvedEndpointBackend) bool {
+			return b.Name == o.Name
+		})
+		if i < 0 || binding.Status.Backends[i].Resolved {
+			continue
+		}
+		reason := binding.Status.Backends[i].Message
+		if reason == "" {
+			reason = binding.Status.Backends[i].Reason
+		}
+		gone = append(gone, fmt.Sprintf("%s, which isn't deployed in %s (%s)", o.Name, binding.Spec.Environment, reason))
+	}
+	return gone
+}
+
+func candidateNames(r *openchoreov1alpha1.EndpointRollout) []string {
+	names := make([]string, 0, len(r.Candidates))
+	for _, c := range r.Candidates {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
 // nextAfter is the first stage past the percents an environment was set to
 // by hand.
 func nextAfter(r *openchoreov1alpha1.EndpointRollout, env *environment, stages []endpointrollout.Stage) int {
@@ -446,6 +485,10 @@ func (s *service) setStage(
 	after, err := endpointrollout.Overrides(ep.Spec.Rollout, env.refs, before, stage)
 	if err != nil {
 		return nil, err
+	}
+	if gone := undeployed(ep.Spec.Rollout, env.binding, after); len(gone) > 0 {
+		return nil, conflict("this step sends traffic to %s; deploy it there first, or move traffic away from it",
+			strings.Join(gone, " and "))
 	}
 	change := &Change{Environment: env.binding.Spec.Environment, Before: before, After: after}
 	if !dryRun {
